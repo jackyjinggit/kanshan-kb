@@ -4,6 +4,10 @@ out/
 *.jsonl
 !评估/**/*.jsonl
 
+# 红线扫描器 · 本地私有词典（含内部人员/账号/术语，绝不入库）
+scripts/redline_patterns.local.json
+*.local.json
+
 # Python
 __pycache__/
 *.pyc

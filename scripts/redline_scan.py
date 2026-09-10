@@ -7,37 +7,65 @@
     python scripts/redline_scan.py                 # 扫全仓（默认仓库根）
     python scripts/redline_scan.py --check-reports # 追加检查 out/ 下报告含"失效条件"
 退出码：0 = 干净；1 = 有命中（可直接当提交前闸门：hit 则拒绝 commit/push）
+
+词典分两层（2026-09-10 修订）：
+  · **通用模式**（本文件内）：凭证样式一类与内部无关、对任何使用者都有意义的规则。
+  · **私有模式**（本地未追踪文件 scripts/redline_patterns.local.json）：内部人员/本机账号/
+    内部术语一类。**不进公开库**——否则脱敏工具自己就成了泄露源（本仓曾踩：词典随脚本入库，
+    而扫描器又跳过自己，于是"扫描干净"与"名录公开"同时成立）。
+    公开 clone 者只跑通用模式；持有私有词典的本机跑全套。
 """
 import argparse
 import io
+import json
 import os
 import re
 import sys
 
-# ---- 红线词典（命中即报，宁可误报不放过；新增人员/术语往这里加）----
+# ---- 通用红线词典（不含任何内部人名/账号/术语，可安全公开）----
 DEFAULT_PATTERNS = {
-    # 1) 他人/内部人物身份（TODO §四 红线1）
-    "人名-队友及内部": r"蒋平|AI协作|组员甲|组员乙|组员丙|组员丁|组员戊|家人|AI|鸿",
-    # 2) 本机路径 / 账号名（红线1：内部路径）
-    "本机路径/账号": r"[A-Za-z]:\\+[Uu]sers\\+user|user|workspace|\.config|\.config|\.config",
-    # 3) 内部术语（红线1：内部术语）
-    "内部术语": r"交接|团队|队长指令|AI协作窗|工具|AI工具",
-    # 4) 凭证样式（防手滑提交 key）
+    # 凭证样式（防手滑提交 key）
     "凭证样式": r"sk-[A-Za-z0-9_\-]{16,}|ghp_[A-Za-z0-9]{20,}|gho_[A-Za-z0-9]{20,}",
 }
+
+# ---- 本地私有词典（不入库；新增内部人员/术语往这里加）----
+LOCAL_PATTERNS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                   "redline_patterns.local.json")
 
 # 扫描范围：文本类文件后缀（数据/产物目录整体跳过）
 TEXT_EXTS = {".md", ".txt", ".py", ".json", ".yaml", ".yml", ".html", ".js", ".ts",
              ".jsonl", ".csv", ".toml", ".cfg", ".ini", ".sh", ".bat", ".ps1"}
 SKIP_DIRS = {".git", "data", "out", "node_modules", "__pycache__", ".venv", "venv"}
-SELF_NAME = os.path.basename(__file__)  # 本文件词典必然自命中，跳过自己
+SELF_NAME = os.path.basename(__file__)                      # 本文件自身跳过
+SKIP_NAMES = {SELF_NAME, os.path.basename(LOCAL_PATTERNS_FILE)}  # 私有词典同样跳过（它必然自命中）
+
+
+def load_patterns():
+    """通用模式 + 本地私有模式（后者存在则合并）。"""
+    patterns = dict(DEFAULT_PATTERNS)
+    if os.path.isfile(LOCAL_PATTERNS_FILE):
+        try:
+            with io.open(LOCAL_PATTERNS_FILE, "r", encoding="utf-8") as f:
+                local = json.load(f)
+            n = 0
+            for key, pat in local.items():
+                if key.startswith("_") or not isinstance(pat, str):
+                    continue          # 下划线开头的键是说明性字段
+                patterns[key] = pat
+                n += 1
+            print(f"[info] 已加载本地私有词典 {os.path.basename(LOCAL_PATTERNS_FILE)}（{n} 类）")
+        except (OSError, ValueError) as e:
+            print(f"[warn] 本地私有词典读取失败（按通用模式继续）：{e}")
+    else:
+        print("[info] 无本地私有词典，仅运行通用模式（公开 clone 的预期状态）")
+    return patterns
 
 
 def iter_files(root: str):
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
         for fn in filenames:
-            if fn == SELF_NAME:
+            if fn in SKIP_NAMES:
                 continue
             ext = os.path.splitext(fn)[1].lower()
             if ext in TEXT_EXTS:
@@ -92,11 +120,12 @@ def main():
     root = os.path.abspath(args.root)
     print(f"== 看山红线扫描 ==\n根目录: {root}\n")
 
+    patterns = load_patterns()
     total_files = 0
     total_hits = 0
     for path in sorted(iter_files(root)):
         total_files += 1
-        hits = scan_file(path, DEFAULT_PATTERNS)
+        hits = scan_file(path, patterns)
         if hits:
             rel = os.path.relpath(path, root)
             for cat, lineno, snippet in hits:
