@@ -31,8 +31,8 @@ CASES = [
     ("<script>alert(1)</script>", "newbie"),
 ]
 
-# 真实样本回归（存在才跑；字段形状与合成一致）
-REAL = r"C:\workspace\知乎黑松客\frontend\_diagnose_tmp\contents.jsonl"
+# 真实样本回归（可选：--real <contents.jsonl 路径>，不写死任何机器路径）
+REAL = None
 
 
 def run(args):
@@ -48,6 +48,10 @@ def sections(md_path):
 
 
 def main():
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--real", default=None, help="可选：真实 contents.jsonl 路径，跑回归")
+    REAL = ap.parse_args().real
     os.makedirs(WORK, exist_ok=True)
     results = []
 
@@ -95,7 +99,7 @@ def main():
     record("同名复现性", h1 == h2, "md5一致=%s" % (h1 == h2))
 
     # 5) 真实样本回归（48 条实测 JSONL）
-    if os.path.exists(REAL):
+    if REAL and os.path.exists(REAL):
         rc, o = run([os.path.join(HERE, "zhihu_diagnose.py"), "--in", REAL,
                      "--out", os.path.join(WORK, "diag_real")])
         record("真实样本回归", rc == 0, "rc=%d" % rc)
