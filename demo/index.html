@@ -31,6 +31,14 @@
   button.ghost{background:transparent;color:var(--accent);border:1px solid var(--accent);font-weight:600}
   button:disabled{opacity:.55;cursor:progress}
   .hint{color:var(--dim);font-size:12.5px}
+  /* 账号/窗口用可点按钮，不用原生 <select>：原生下拉在部分渲染器里会被下方按钮盖住，
+     且浅色字遇上系统白底弹出层会变成白字白底（实机踩到过，现场演示不能赌渲染器）。 */
+  html{color-scheme:dark}
+  .chips{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+  .chip{background:var(--panel2);border:1px solid var(--line);color:var(--dim);border-radius:999px;
+        padding:8px 14px;font-size:13.5px;cursor:pointer;user-select:none}
+  .chip:hover{border-color:var(--accent)}
+  .chip.on{background:rgba(94,177,255,.16);border-color:var(--accent);color:#fff;font-weight:600}
   .badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:700}
   .b-高{background:rgba(224,82,74,.16);color:#ff8880;border:1px solid rgba(224,82,74,.5)}
   .b-中{background:rgba(224,162,74,.16);color:#f0b866;border:1px solid rgba(224,162,74,.5)}
@@ -92,20 +100,20 @@
   <!-- ===== 入口一：账号诊断 ===== -->
   <section id="paneA">
     <div class="row">
-      <label>演示账号类型</label>
-      <select id="arch"></select>
+      <label>账号</label>
+      <div class="chips" id="archChips"></div>
       <label>账号名</label>
       <input id="user" value="演示账号" style="width:130px">
       <label>窗口</label>
-      <select id="days">
-        <option value="30" selected>近 30 天</option>
-        <option value="60">近 60 天</option>
-        <option value="90">近 90 天</option>
-      </select>
+      <div class="chips" id="dayChips">
+        <div class="chip" data-day="30">近 30 天</div>
+        <div class="chip" data-day="60">近 60 天</div>
+        <div class="chip" data-day="90">近 90 天</div>
+      </div>
       <button id="btnDiag">生成诊断 + 处方</button>
-      <span class="hint" id="archDesc"></span>
     </div>
-    <div class="flag">数据说明：这里的账号数据由 <code>scripts/demo_synth.py</code> <b>合成生成</b>（用于现场演示与回归测试），不是任何真实账号的数据。真实数据入口是<code>scripts/zhihu_fetch.py</code> 拉取本人授权数据后跑同一套引擎。</div>
+    <div class="hint" id="archDesc"></div>
+    <div class="flag" id="dataNote">数据说明：这里的账号数据由 <code>scripts/demo_synth.py</code> <b>合成生成</b>（用于现场演示与回归测试），不是任何真实账号的数据。换真实账号：把 zhihu-cli 拉取的 <code>contents_*.jsonl</code> 放进 <code>data/real/</code>（一个文件 = 一个账号，可并存多个），重启网关即自动加载；也可 <code>python demo/server.py --data &lt;本人 contents.jsonl&gt;</code>。两条路径跑的是同一套引擎。</div>
     <div id="diagOut"></div>
   </section>
 
@@ -130,6 +138,9 @@
 <script>
 "use strict";
 const $ = (id) => document.getElementById(id);
+/* 直接从磁盘打开（file://）或在沙箱预览面板里（origin 为 null）时，
+   同源相对路径打不到本机网关 → 显式指向 127.0.0.1:8699。 */
+const API = (location.protocol === "file:" || location.origin === "null") ? "http://127.0.0.1:8699" : "";
 
 function esc(s){
   return String(s == null ? "" : s)
@@ -187,7 +198,7 @@ function renderMd(md){
 }
 
 async function post(url, body){
-  const r = await fetch(url, {method:"POST", headers:{"Content-Type":"application/json"},
+  const r = await fetch(API + url, {method:"POST", headers:{"Content-Type":"application/json"},
                               body: JSON.stringify(body)});
   let data;
   try { data = await r.json(); } catch(e){ throw new Error("服务返回不是 JSON（HTTP " + r.status + "）"); }
@@ -196,7 +207,33 @@ async function post(url, body){
 }
 
 /* ---------- 入口一 ---------- */
-let ARCH = {}, SEV = {};
+let ARCH = {}, SEV = {}, archSel = "", daySel = 30;
+
+function renderArch(){
+  const keys = Object.keys(ARCH);
+  if (!archSel || keys.indexOf(archSel) < 0) archSel = keys[0] || "";
+  $("archChips").innerHTML = keys.map(k =>
+    '<div class="chip' + (k === archSel ? " on" : "") + '" data-arch="' + esc(k) + '">' + esc(ARCH[k].label) + '</div>').join("");
+  Array.prototype.forEach.call($("archChips").children, c => c.onclick = () => {
+    archSel = c.dataset.arch; renderArch();
+  });
+  /* 真实账号：账号名由数据决定，不给改（改了也不影响取数，避免误会）；切回合成对照再放开 */
+  const isReal = (ARCH[archSel] || {}).kind === "real";
+  if (isReal){
+    if (!$("user").disabled) window.__synthUser = $("user").value;
+    $("user").value = (window.__accountLabels || {})[archSel] || window.__realUser || "本人账号";
+  } else if ($("user").disabled){
+    $("user").value = window.__synthUser || "演示账号";
+  }
+  $("user").disabled = isReal;
+  $("archDesc").textContent = (ARCH[archSel] || {}).desc || "";
+}
+function renderDays(){
+  Array.prototype.forEach.call($("dayChips").children, c => {
+    c.classList.toggle("on", +c.dataset.day === daySel);
+    c.onclick = () => { daySel = +c.dataset.day; renderDays(); };
+  });
+}
 
 function rxCard(r){
   const acts = (r.actions||[]).map(a => "<li>" + inline(esc(a)) + "</li>").join("");
@@ -227,10 +264,9 @@ function briefList(list){
 }
 
 async function runDiagnose(){
-  const btn = $("btnDiag"); btn.disabled = true; $("diagOut").innerHTML = "<p class='hint'>生成中……（合成数据 → 七节诊断 → 信号 → 处方）</p>";
+  const btn = $("btnDiag"); btn.disabled = true; $("diagOut").innerHTML = "<p class='hint'>生成中……（取数 → 七节诊断 → 信号 → 处方）</p>";
   try{
-    const d = await post("/api/diagnose", {user: $("user").value, archetype: $("arch").value,
-                                           days: +$("days").value});
+    const d = await post("/api/diagnose", {user: $("user").value, archetype: archSel, days: daySel});
     const s = d.summary || {};
     const g = {alert:[], watch:[], unknown:[], ok:[], error:[]};
     d.prescriptions.forEach(r => { (g[r.state] || (g[r.state] = [])).push(r); });
@@ -352,21 +388,40 @@ $("btnDiag").onclick = runDiagnose;
 $("btnAnalyze").onclick = runAnalyze;
 
 (async function init(){
+  renderDays();
   try{
-    const r = await fetch("/api/status"); const s = await r.json();
+    const r = await fetch(API + "/api/status"); const s = await r.json();
     ARCH = s.archetypes || {}; SEV = s.severity_hint || {};
-    $("arch").innerHTML = Object.keys(ARCH).map(k =>
-      '<option value="' + esc(k) + '">' + esc(ARCH[k].label) + '</option>').join("");
-    const desc = () => $("archDesc").textContent = (ARCH[$("arch").value]||{}).desc || "";
-    $("arch").onchange = desc; desc();
+    renderArch();
+    const realUser = ds.mode === "real" ? ds.user : "";
+    window.__realUser = realUser;
+    window.__accountLabels = {};
+    (ds.accounts || []).forEach(a => { window.__accountLabels[a.id] = a.label; });
+    if (ds.mode === "real"){
+      const accs = ds.accounts || [];
+      const list = accs.map((a, i) => '<b>' + esc(a.label) + '</b>（' + a.n + ' 条，最新 ' + esc(a.newest) + '）' +
+        (i === 0 ? ' ← 默认' : '')).join('　·　');
+      $("dataNote").innerHTML = '<b>真实数据模式</b>：已加载 <b>' + accs.length + '</b> 个账号 —— ' + list + '。' +
+        '一个账号 = 本机 <code>data/real/</code> 下一份 <code>contents_*.jsonl</code>（zhihu-cli 拉取），' +
+        '换账号就是多放一个文件、刷新即可切，<b>不用停服务、不用改代码</b>；' +
+        '数据只在本地读取、<b>不上传</b>；与合成数据跑的是同一套引擎。' +
+        '带「合成·」前缀的是<b>对照账号</b>（脚本生成，非真实账号）。' +
+        (accs.length === 1 ? '<br>再拉一个账号：<code>python scripts/zhihu_fetch.py --out data/real/contents_&lt;账号标签&gt;_&lt;日期&gt;.jsonl</code>' : '') +
+        (accs.some(a => a.bad) ? '<br>已跳过坏行：' + accs.filter(a => a.bad).map(a => esc(a.label) + ' ' + a.bad + ' 行').join('、') + '（优雅降级）。' : "");
+    }
+    renderArch();
     $("status").innerHTML =
       "<b>引擎状态</b>　Python " + esc(s.python) + "　|　处方规则族 " + s.prescription_rules + " 条　|　" +
+      "数据：" + (ds.mode === "real" ? '<span class="badge b-高">真实数据 · ' + (ds.accounts || []).length + ' 个账号</span>' : '<span class="badge b-中">合成演示数据</span>') + "　|　" +
       "校验规则插槽：" + esc(s.rules_slot.source) + (s.rules_slot.is_example ? ' <span class="badge b-中">当前为示例规则</span>' : ' <span class="badge b-低">已由设计组接管</span>') +
       "<div class='note'>" + esc(s.rules_slot.note) + "</div>" +
       "<div class='note'>" + esc(s.disclaimer) + "</div>" +
-      "<div class='note'>本页离线运行：不联网、不读凭证文件、不上传任何内容；贴入的文本只在本次本地请求里处理。</div>";
+      "<div class='note'>本页离线运行：不读取任何凭证文件；贴入的文本只在本次本地请求里处理，不出本机。</div>";
   }catch(e){
-    $("status").innerHTML = '<span class="err">读取引擎状态失败：' + esc(e.message) + '（请确认通过 python demo/server.py 启动后访问本页）</span>';
+    $("status").innerHTML = '<span class="err"><b>读取引擎状态失败：</b>' + esc(e.message) +
+      '<br>页面来源：' + esc(location.href) +
+      '<br>本页连的是 <code>' + esc(API || location.origin) + '</code>——请先启动本机网关：<code>python demo/server.py</code>' +
+      (API ? '（若已启动，检查 8699 端口是否被占用）' : '') + '</span>';
   }
   runDiagnose();
 })();

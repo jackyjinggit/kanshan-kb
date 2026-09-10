@@ -16,6 +16,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -239,6 +240,124 @@ def check_demo_server():
             proc.kill()
 
 
+def check_gateway_real_data():
+    """真实数据模式（多账号并存）：本机 zhihu-cli 拉取的 jsonl 走同一套引擎，一个文件 = 一个账号。
+    顺带把已踩过的坑钉成闸门：①页面不得再用原生 <select>（会被下方按钮盖住、白底白字）
+    ②file:// 直开/预览面板要能连上本机网关（Origin: null 才放行，外站一律不给 CORS 头）
+    ③两个账号的结论必须各标自己的文件（防串号——换账号能不能真出结果，就看这条）。
+    本机无 data/real/*.jsonl 时跳过（真实数据不入库，别的机器上本来就没有）。"""
+    real_dir = os.path.join(ROOT, "data", "real")
+    names = sorted(n for n in os.listdir(real_dir) if n.endswith(".jsonl")) if os.path.isdir(real_dir) else []
+    if not names:
+        return ("真实数据模式（多账号网关）", True, "（本机无 data/real/*.jsonl，跳过）")
+    files = [os.path.join(real_dir, n) for n in names]
+    files.sort(key=os.path.getmtime, reverse=True)                 # 最近拉取的在前
+    extra_note = ""
+    if len(files) == 1:
+        # 本机只有一个真数据文件 → 用「同账号最近 60 条切片」当第二个账号：
+        # 只验「并存 + 不串号」，**不声称它是另一个账号**（换了账号的真实验证需第二份真数据）
+        with open(files[0], encoding="utf-8") as f:
+            lines = [x for x in f.read().splitlines() if x.strip()]
+        cut = os.path.join(WORK, "acc_slice.jsonl")
+        with open(cut, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines[:60]) + "\n")
+        files = [files[0], cut]
+        extra_note = "（第二份=同账号最近 60 条切片，非另一个账号）"
+    paths, ids = files[:2], [os.path.basename(p) for p in files[:2]]
+    port = _free_port()
+    proc = subprocess.Popen([PY, os.path.join(ROOT, "demo", "server.py"), "--port", str(port), "--no-browser",
+                             "--data", paths[0], "--data-user", "验收账号A",
+                             "--data", paths[1], "--data-user", "验收账号B"],
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, cwd=ROOT)
+    base = "http://127.0.0.1:%d" % port
+    bad = []
+
+    def call(p, payload=None, origin=None, method=None):
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8") if payload is not None else None
+        hdr = {"Content-Type": "application/json; charset=utf-8"}
+        if origin:
+            hdr["Origin"] = origin
+        req = urllib.request.Request(base + p, data=data, headers=hdr, method=method)
+        with urllib.request.urlopen(req, timeout=90) as r:
+            body = r.read().decode("utf-8")
+            return r.status, (json.loads(body) if body else {}), dict(r.headers)
+
+    try:
+        for _ in range(40):
+            try:
+                if call("/api/health")[0] == 200:
+                    break
+            except Exception:
+                time.sleep(0.25)
+        else:
+            return ("真实数据模式（多账号网关）", False, "30 秒内未就绪")
+        _st, s, h = call("/api/status", origin="null")
+        ds = s.get("data_source") or {}
+        archs = s.get("archetypes") or {}
+        accs = ds.get("accounts") or []
+        if ds.get("mode") != "real":
+            bad.append("data_source.mode=%s" % ds.get("mode"))
+        if [a.get("id") for a in accs] != ids:
+            bad.append("账号清单=%s（应为 %s）" % ([a.get("id") for a in accs], ids))
+        if ds.get("default") != ids[0]:
+            bad.append("默认账号不是最近拉取的那份")
+        for i in ids:
+            if (archs.get(i) or {}).get("kind") != "real":
+                bad.append("账号 %s 未作为真实账号进清单" % i)
+        if len([v for v in archs.values() if v.get("kind") == "real"]) != 2:
+            bad.append("真实账号项数≠2（页面上的账号按钮会不对）")
+        if h.get("Access-Control-Allow-Origin") != "null":
+            bad.append("Origin: null 未放行")
+        got, lists = {}, {}
+        for i in ids:                                   # 两个账号各自出结论，且各标自己的文件（不串号）
+            _st, d, _h = call("/api/diagnose", {"archetype": i, "days": 30}, origin="null")
+            m, sm = d.get("meta") or {}, d.get("summary") or {}
+            if i not in (m.get("data_kind") or ""):
+                bad.append("账号 %s 的结论没标自己的数据文件" % i)
+            if len(d.get("prescriptions") or []) < 10:
+                bad.append("账号 %s 规则族 <10 条" % i)
+            if not sm.get("alert_ids"):
+                bad.append("账号 %s 行动清单为空" % i)
+            got[i] = (m.get("n_records"), sm.get("alerts"))
+            lists[i] = tuple(sm.get("alert_ids") or ())
+        # 行动清单内容只作**证据记录**不设硬判：两账号是同一个人时清单相同是正常的，
+        # 真正的串号信号是「记录数 + 条数」双双相同（下面这条），以及上面每条结论各标自己的文件。
+        same_list = len(set(lists.values())) == 1
+        _st, d0, _h = call("/api/diagnose", {"archetype": "real", "days": 30}, origin="null")
+        if (d0.get("meta") or {}).get("n_records") != got[ids[0]][0]:
+            bad.append("archetype=real 别名没落到默认账号")
+        if len(set(got.values())) == 1:
+            bad.append("两账号给出完全相同的结论（疑似串号）")
+        if call("/api/status", origin="https://evil.example.com")[2].get("Access-Control-Allow-Origin"):
+            bad.append("外站被放行（不该有 CORS 头）")
+        if call("/api/status", origin="null", method="OPTIONS")[0] != 204:
+            bad.append("OPTIONS 预检未通过")
+        page = urllib.request.urlopen(base + "/", timeout=10).read().decode("utf-8")
+        # 查「真实 DOM」前先剥掉 HTML/CSS 注释：注释里写的示例代码不算控件
+        slim = re.sub(r"/\*.*?\*/", "", re.sub(r"<!--.*?-->", "", page, flags=re.S), flags=re.S)
+        if "<select" in slim:
+            bad.append("页面仍有原生 <select>（会被下面按钮盖住）")
+        if 'id="archChips"' not in slim or 'id="dayChips"' not in slim:
+            bad.append("账号/窗口的可点按钮容器缺失")
+        if 'location.origin === "null"' not in page:
+            bad.append("页面缺 file:// 直开的接口兜底")
+        if "__accountLabels" not in page:
+            bad.append("页面没按账号给出显示名（切账号时名字不会跟着变）")
+        return ("真实数据模式（多账号网关）", not bad,
+                "账号=%s · 各自 n/行动=%s · 行动清单%s · Origin:null放行=%s%s"
+                % ("/".join(ids), got, "相同（同一账号属正常）" if same_list else "不同",
+                   h.get("Access-Control-Allow-Origin") == "null", extra_note)
+                if not bad else "；".join(bad[:3]) + extra_note)
+    except Exception as e:
+        return ("真实数据模式（多账号网关）", False, "异常：%s" % str(e)[:90])
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+
 def check_unit_suite(run):
     """单元/边界测试套件全绿"""
     rc, o = run(["-m", "unittest", "discover", "-s", "tests", "-t", "."])
@@ -355,6 +474,7 @@ def main():
     record(*check_rules_slot(WORK, run))
     record(*check_account_differentiation(WORK, run))
     record(*check_demo_server())
+    record(*check_gateway_real_data())
     record(*check_unit_suite(run))
 
     ok_n = sum(1 for _, v, _ in results if v)

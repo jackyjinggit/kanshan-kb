@@ -99,7 +99,19 @@ class TestDemoServer(unittest.TestCase):
         s = json.loads(body)
         self.assertTrue(s["ok"] and s["offline"])
         self.assertGreaterEqual(s["prescription_rules"], 10)
-        self.assertEqual(len(s["archetypes"]), 4)
+        # 账号清单 = 4 个合成对照 + 本机 data/real/ 里的真实账号（本机有真数据时才有，别的机器上本来就没有）
+        synth = [k for k, v in s["archetypes"].items() if v.get("kind") == "synth"]
+        real = [k for k, v in s["archetypes"].items() if v.get("kind") == "real"]
+        self.assertEqual(sorted(synth), sorted(["polluted", "newbie", "vertical", "omnivore"]))
+        self.assertTrue(all(s["archetypes"][k]["label"].startswith("合成·") for k in synth),
+                        "合成对照必须带「合成·」前缀，不能和真实账号混在一起分不清")
+        ds = s["data_source"]
+        if ds["mode"] == "real":
+            self.assertTrue(real, "真实模式下账号清单里必须有真实账号项")
+            self.assertEqual(real, [a["id"] for a in ds["accounts"]], "清单键必须逐个对上一个账号")
+            self.assertEqual(ds["default"], ds["accounts"][0]["id"], "默认账号 = 清单第一个")
+        else:
+            self.assertFalse(real, "合成模式下不该有真实账号项")
         self.assertIn("rules_slot", s)
         self.assertIn(s["rules_slot"]["source"], ("content_rules.json", "content_rules.local.json",
                                                  "content_rules.default.json"))

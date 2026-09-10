@@ -39,9 +39,15 @@
 ```bash
 python demo/server.py --no-browser      # 起本地页面（默认 http://127.0.0.1:8699）
 # Windows 也可双击 demo/run_demo.bat
+
+# 真实账号数据（本人授权 zhihu-cli 拉取后 → 同一套引擎）
+python scripts/zhihu_fetch.py --out data/real/contents_<账号标签>_<日期>.jsonl
+python demo/server.py                    # data/real/ 下有几个文件就加载几个账号
 ```
 
-- **入口① 账号诊断**：选演示账号类型 → 七节诊断报告 + 处方单。处方按状态分四组呈现：**本期行动清单（命中）/ 观察项 / 待补样本 / 已排除**，每条含 异常信号 → M1~M10 模块 → 具体动作 → 依据 md → 失效条件。规则族 15 条全跑（不漏检），进行动清单的只有真正命中的 → **换一个账号，清单跟着变**。
+- **入口① 账号诊断**：选账号 → 七节诊断报告 + 处方单。处方按状态分四组呈现：**本期行动清单（命中）/ 观察项 / 待补样本 / 已排除**，每条含 异常信号 → M1~M10 模块 → 具体动作 → 依据 md → 失效条件。规则族 15 条全跑（不漏检），进行动清单的只有真正命中的 → **换一个账号（或换一个窗口），清单跟着变**。
+  **换账号 = 多放一个文件**：`data/real/*.jsonl` 一个文件算一个账号（页面账号按钮各占一个，默认选最近拉取的那份），可并存多个、不用改代码、不用重启。也可 `--data <a.jsonl> --data-user 甲 --data <b.jsonl> --data-user 乙` 显式指定。账号名只能由人给（zhihu-cli 不返回账号身份，见 `demo/README.md`）。
+  真实账号用真实数据，原演示原型保留作对照并标「合成·」前缀；页面顶栏标出「真实数据 · N 个账号」还是「合成演示数据」。
 - **入口② 贴入式内容分析**：**不需要任何账号授权**，贴一段文本即可出 M4 爆款要素体检 + 结构诊断 + M10 合规风险自查 + 校验规则插槽
 
 > 现场若没有 Python / 断网：直接双击预渲染单文件 HTML（见 `scripts/prerender_demo.py` 生成），内容与在线演示同源。
@@ -68,9 +74,9 @@ python scripts/content_analyze.py --file 草稿.md
 ### 3.3 一键验收
 
 ```bash
-python scripts/e2e_test.py                     # 23 项
+python scripts/e2e_test.py                     # 25 项
 python scripts/e2e_test.py --real data/contents.jsonl    # 带上真实样本回归
-python -m unittest discover -s tests -t .      # 单元/边界（54 项）
+python -m unittest discover -s tests -t .      # 单元/边界（62 项）
 ```
 
 > 验收口径：e2e 的「真实样本回归」一项在没给 `--real` 时会**跳过但仍计入通过**——看数时注意区分「跑过」与「跳过」。
