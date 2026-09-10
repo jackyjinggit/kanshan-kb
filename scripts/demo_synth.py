@@ -145,7 +145,13 @@ def gen(user, archetype, n, rng):
             items.append(make_item(rng, user, rng.choice(GENRE_KEYS), ts, likes, i))
     elif archetype == "polluted":
         span = 2100
-        for i in range(n):
+        # 老号也在持续更新：近 45 天必须有量，否则「同期窗口」无从对照（全量均值被早年爆款拉高才是本型的看点）
+        n_recent = max(10, int(n * 0.25))
+        for i in range(n_recent):
+            ts = base - rng.uniform(0, 45) * 86400
+            likes = min(int(rng.paretovariate(1.8) * 3), 40)
+            items.append(make_item(rng, user, rng.choice(GENRE_KEYS), ts, likes, i))
+        for i in range(n_recent, n):
             ts = base - rng.uniform(60, span) * 86400
             likes = min(int(rng.paretovariate(1.8) * 3), 40)
             items.append(make_item(rng, user, rng.choice(GENRE_KEYS), ts, likes, i))

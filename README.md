@@ -34,6 +34,20 @@
 
 ## 三、快速开始
 
+### 3.1 现场演示（两条入口 · 离线零依赖）
+
+```bash
+python demo/server.py --no-browser      # 起本地页面（默认 http://127.0.0.1:8699）
+# Windows 也可双击 demo/run_demo.bat
+```
+
+- **入口① 账号诊断**：选演示账号类型 → 七节诊断报告 + 处方（异常信号 → M1~M10 模块 → 具体动作 → 依据 md → 失效条件）
+- **入口② 贴入式内容分析**：**不需要任何账号授权**，贴一段文本即可出 M4 爆款要素体检 + 结构诊断 + M10 合规风险自查 + 校验规则插槽
+
+> 现场若没有 Python / 断网：直接双击预渲染单文件 HTML（见 `scripts/prerender_demo.py` 生成），内容与在线演示同源。
+
+### 3.2 命令行链路
+
 ```bash
 # 1. 配置凭证（Access Secret 从 https://developer.zhihu.com/profile 生成）
 zhihu-cli auth set --secret-stdin
@@ -43,7 +57,24 @@ python scripts/zhihu_fetch.py --out data/contents.jsonl
 
 # 3. 诊断（年度节奏 / 爆发期切片 / 类型效率 / 题材效率 / 篇幅同期对照 / CTA 对照）
 python scripts/zhihu_diagnose.py --in data/contents.jsonl --out out/
+
+# 4. 处方（异常信号 → 模块 → 动作 → 依据 → 失效条件）
+python scripts/prescribe.py --in data/contents.jsonl --out out/ --json out/prescribe.json
+
+# 5. 贴入式内容分析（无需账号；规则从外部 JSON 读，注入 --rules 即换规则库）
+python scripts/content_analyze.py --file 草稿.md
 ```
+
+### 3.3 一键验收
+
+```bash
+python scripts/e2e_test.py                     # 23 项
+python scripts/e2e_test.py --real data/contents.jsonl    # 带上真实样本回归
+python -m unittest discover -s tests -t .      # 单元/边界（54 项）
+```
+
+> 验收口径：e2e 的「真实样本回归」一项在没给 `--real` 时会**跳过但仍计入通过**——看数时注意区分「跑过」与「跳过」。
+
 
 ## 四、诊断输出什么
 
@@ -87,10 +118,19 @@ python scripts/zhihu_diagnose.py --in data/contents.jsonl --out out/
 ## 七、路线图
 
 - [x] v0.1 方法论骨架（M1~M10）
-- [ ] v0.2 数据接入 + 诊断脚本开源版（含示例数据）
-- [ ] v0.3 处方引擎（异常信号 → 模块 → 动作）
-- [ ] v0.4 呈现层（日报 / 台账）
-- [ ] v1.0 demo 全流程跑通
+- [x] v0.2 数据接入 + 诊断脚本开源版（含合成示例数据）
+- [x] v0.3 处方引擎（异常信号 → 模块 → 动作 → 依据 → 失效条件，15 条规则族）
+- [~] v0.4 呈现层：本地演示页（账号诊断 + 贴入式分析）✅ / 日报、台账 🟡
+- [x] v0.5 demo 全流程跑通（一键验收 23/23；单元/边界 54 项；离线预渲染兜底）
+
+## 七之二、目录
+
+```
+M1~M10/          方法论层（骨架；方法 md 待内容组填充）
+scripts/         数据接入 · 诊断 · 处方 · 贴入式分析 · 合成数据 · 端到端验收 · 预渲染
+demo/            本地演示（单文件页面 + stdlib 网关）
+tests/           单元与边界测试（unittest，无第三方依赖）
+```
 
 ## 八、红线
 

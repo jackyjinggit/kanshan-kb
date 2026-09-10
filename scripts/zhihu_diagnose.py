@@ -60,29 +60,14 @@ def stat(subset, label):
                sum(fv), sum(fv) / n, zero * 100.0 / n, has_c * 100.0 / n))
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--in", dest="src", default=os.path.join("data", "contents.jsonl"))
-    ap.add_argument("--out", default="out")
-    ap.add_argument("--days", type=int, default=60, help="近期窗口（天）")
-    ap.add_argument("--user", default=None, help="用户名（缺省取数据内 AuthorName，无则『未标注』）")
-    a = ap.parse_args()
-
-    try:
-        items = load(a.src)
-    except OSError as e:
-        print("[!] 读不了数据文件：%s" % e)
-        print("    先用 scripts/zhihu_fetch.py 拉取本人数据，或 scripts/demo_synth.py --user <任意用户名> 造测试数据")
-        return 1
-    if not items:
-        print("[!] 无有效数据（文件为空或全部行损坏）"); return 1
-    os.makedirs(a.out, exist_ok=True)
+def build_report(items, days=60, user=None, src_label="(未标注来源)"):
+    """生成七节诊断报告（CLI 与 demo 服务共用同一实现，避免两套口径）"""
     now = max(it["dt"] for it in items)
-    recent = [it for it in items if (now - it["dt"]).days <= a.days]
+    recent = [it for it in items if (now - it["dt"]).days <= days]
 
-    user = (a.user or "").strip() or ((items[0].get("AuthorName") or "").strip() or "未标注")
+    user = (user or "").strip() or ((items[0].get("AuthorName") or "").strip() or "未标注")
     L = ["# 看山诊断报告（用户：%s · 生成 %s）" % (user, datetime.date.today()),
-         "数据源: %s（%d 条，%s ~ %s）" % (a.src, len(items),
+         "数据源: %s（%d 条，%s ~ %s）" % (src_label, len(items),
                                           min(it["dt"] for it in items).date(), now.date()),
          ""]
 
@@ -94,7 +79,7 @@ def main():
         L.append("  " + stat(by_year[y], "%d年" % y))
 
     L += ["", "## 二、近期窗口（避开历史爆款污染）"]
-    for d in (7, 30, a.days, 365):
+    for d in (7, 30, days, 365):
         L.append("  " + stat([it for it in items if (now - it["dt"]).days <= d], "近%d天" % d))
 
     L += ["", "## 三、内容类型效率"]
@@ -103,9 +88,9 @@ def main():
         by_type[it.get("ContentType")].append(it)
     for t, v in sorted(by_type.items(), key=lambda kv: -len(kv[1])):
         L.append("  [%s] " % t + stat(v, "全量"))
-        r = [x for x in v if (now - x["dt"]).days <= a.days]
+        r = [x for x in v if (now - x["dt"]).days <= days]
         if r:
-            L.append("       " + stat(r, "近%d天" % a.days))
+            L.append("       " + stat(r, "近%d天" % days))
 
     L += ["", "## 四、题材效率（产能压对地方了吗）"]
     for g, p in TOPIC_PATTERNS.items():
@@ -137,10 +122,31 @@ def main():
           "- 篇幅/题材/CTA 均为**观察性相关**，非 A/B 实验；方向可采信，倍数不当精确预测",
           "- 若按结论调整后指标未改善 → 说明该变量非因果，回炉重测其他变量",
           "- 题材分组用正则匹配，存在归类重叠，方向性结论可靠"]
+    return "\n".join(L)
 
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--in", dest="src", default=os.path.join("data", "contents.jsonl"))
+    ap.add_argument("--out", default="out")
+    ap.add_argument("--days", type=int, default=60, help="近期窗口（天）")
+    ap.add_argument("--user", default=None, help="用户名（缺省取数据内 AuthorName，无则『未标注』）")
+    a = ap.parse_args()
+
+    try:
+        items = load(a.src)
+    except OSError as e:
+        print("[!] 读不了数据文件：%s" % e)
+        print("    先用 scripts/zhihu_fetch.py 拉取本人数据，或 scripts/demo_synth.py --user <任意用户名> 造测试数据")
+        return 1
+    if not items:
+        print("[!] 无有效数据（文件为空或全部行损坏）"); return 1
+    os.makedirs(a.out, exist_ok=True)
+
+    md = build_report(items, days=a.days, user=a.user, src_label=a.src)
     out_md = os.path.join(a.out, "diagnose.md")
-    open(out_md, "w", encoding="utf-8").write("\n".join(L))
-    print("\n".join(L))
+    open(out_md, "w", encoding="utf-8").write(md)
+    print(md)
     print("\n[+] 报告 -> %s" % out_md)
     return 0
 
