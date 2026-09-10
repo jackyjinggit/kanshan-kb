@@ -246,6 +246,47 @@ def check_unit_suite(run):
     return ("单元/边界测试套件", rc == 0 and "OK" in o, "rc=%d %s" % (rc, " / ".join(tail)))
 
 
+def check_account_differentiation(work, run):
+    """换账号要各自出不同的建议：行动清单(alert)必须随账号变，不能是一份固定清单"""
+    hits, bad, headline = {}, [], []
+    for i, (user, arch) in enumerate((("对照甲", "polluted"), ("对照乙", "newbie"), ("对照甲", "vertical"))):
+        key = "%s/%s" % (user, arch)
+        src = os.path.join(work, "src_diff_%d.jsonl" % i)
+        out = os.path.join(work, "diff_%d" % i)
+        run([os.path.join(HERE, "demo_synth.py"), "--user", user, "--archetype", arch, "--out", src])
+        rc, o = run([os.path.join(HERE, "prescribe.py"), "--in", src, "--out", out, "--user", user,
+                     "--json", os.path.join(out, "prescribe.json")])
+        jp = os.path.join(out, "prescribe.json")
+        if rc != 0 or not os.path.exists(jp):
+            bad.append("%s rc=%d" % (key, rc))
+            continue
+        with open(jp, encoding="utf-8") as f:
+            data = json.load(f)
+        s = data["summary"]
+        rxs = data["prescriptions"]
+        hits[key] = tuple(s.get("alert_ids") or ())
+        headline.append(s.get("headline") or "")
+        if not s.get("headline"):
+            bad.append("%s 缺个性化结论句" % key)
+        if any("state" not in r for r in rxs):
+            bad.append("%s 有处方缺 state" % key)
+        if len(rxs) != len(set(r["id"] for r in rxs)):
+            bad.append("%s 处方 id 重复" % key)
+        groups = sum(1 for r in rxs if r["state"] == "alert")
+        if groups != len(hits[key]):
+            bad.append("%s 行动清单条数与 alert_ids 不一致" % key)
+    if len(set(hits.values())) < len(hits):
+        bad.append("不同账号行动清单重复：%s" % hits)
+    if len(set(len(v) for v in hits.values())) < 2:
+        bad.append("命中条数恒定：%s" % [len(v) for v in hits.values()])
+    if len(set(headline)) < len(headline):
+        bad.append("不同账号结论句相同")
+    note = "3 账号行动清单 %s · %s" % (
+        [len(v) for v in hits.values()],
+        "；".join("%s→%s" % (k, ",".join(v) or "(空)") for k, v in hits.items()))
+    return ("换账号各自出不同建议（清单随账号变）", not bad, note if not bad else "；".join(bad[:3]))
+
+
 def main():
     import argparse
     ap = argparse.ArgumentParser()
@@ -312,6 +353,7 @@ def main():
         record(name, ok, note)
 
     record(*check_rules_slot(WORK, run))
+    record(*check_account_differentiation(WORK, run))
     record(*check_demo_server())
     record(*check_unit_suite(run))
 

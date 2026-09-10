@@ -55,6 +55,7 @@
 | 2026-09-08 | v0.1 方法论骨架（M1~M10，脱敏子集） |
 | 2026-09-09 | README 重写为三层架构；新增数据接入 + 诊断脚本（已验证）；建分工表与预案 |
 | 2026-09-10 | README 补演示与验收入口；新增贴入式分析 / 演示网关 / 离线预渲染 / e2e 23 项 / 单元 54 项（见 §八） |
+| 2026-09-10 晚（追加） | 处方分状态（行动/观察/待补/已排除）→ **换账号出不同建议**；e2e 24 项 / 单元 62 项（见 §八） |
 
 
 ## 六、demo 整合与测试清单（2026-09-09 整理）
@@ -112,15 +113,16 @@
 | 贴入式内容分析（**新入口**，无需账号授权） | `scripts/content_analyze.py` ＋ 演示页「贴入式内容分析」页签 | ✅ M4 四要素打分 / 结构诊断 / M10 合规自查 / 校验规则插槽 |
 | 本地演示网关 + 单文件页面 | `demo/server.py`、`demo/index.html`、`demo/run_demo.bat` | ✅ 离线、零依赖、纯 stdlib、只绑 127.0.0.1 |
 | 离线预渲染（断网兜底） | `scripts/prerender_demo.py` → 单文件 HTML | ✅ 3 个演示账号 + 2 个贴入示例，双击即看 |
-| 端到端验收 | `scripts/e2e_test.py` | ✅ **23/23**（原 13 项保留 + 新增 10 项） |
-| 单元/边界测试 | `tests/`（54 项） | ✅ 全绿 |
-| 处方引擎 | `scripts/prescribe.py`（15 条规则族） | ✅ 每条含 信号→模块→动作→依据→失效条件 |
+| 端到端验收 | `scripts/e2e_test.py` | ✅ **24/24**（原 13 项 + 新增 10 项 + 本次新增「换账号各自出不同建议」） |
+| 单元/边界测试 | `tests/`（62 项） | ✅ 全绿（含 8 账号状态合法性、分组完备性、`_rx` 源码静态闸门） |
+| 处方引擎 | `scripts/prescribe.py`（15 条规则族） | ✅ 每条含 信号→模块→动作→依据→失效条件；**按状态分组**：行动/观察/待补样本/已排除 |
+| 处方分状态（本次收口） | `scripts/prescribe.py`、`demo/index.html`、`scripts/prerender_demo.py` | ✅ 规则族 15 条全跑（不漏检），命中的才进行动清单 → 4 原型行动 5/6/7/9 条互不相同 |
 
 ### 验收命令（复现用）
 
 ```bash
-python scripts/e2e_test.py --real <contents.jsonl>      # 23/23
-python -m unittest discover -s tests -t .               # 54 OK
+python scripts/e2e_test.py --real <contents.jsonl>      # 24/24
+python -m unittest discover -s tests -t .               # 62 OK
 python scripts/prerender_demo.py --out <目录>            # 离线单文件
 ```
 

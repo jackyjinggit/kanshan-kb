@@ -7,6 +7,7 @@
 
 覆盖：正常信号、零互动账号、单条数据、极端均值、缺字段、全规则可执行性（防规则内文案格式化异常）
 """
+import ast
 import datetime
 import os
 import random
@@ -192,6 +193,118 @@ class TestSignalsLayer(unittest.TestCase):
         b = sg.extract(sg.attach_dt(items)[0], days=30, user="复现账号")
         self.assertEqual(a, b)
         self.assertEqual(a["schema"], "kanshan.signals/1")
+
+
+def _all_account_runs():
+    """4 原型 × 2 用户名 = 8 个账号的 (signals, prescriptions)"""
+    out = {}
+    for arch in demo_synth.ARCH_DEFAULTS:
+        for u in ("演示账号甲", "演示账号乙"):
+            rng = random.Random(demo_synth.seed_of(u))
+            items = demo_synth.gen(u, arch, demo_synth.ARCH_DEFAULTS[arch], rng)
+            out[(arch, u)] = pr.prescribe_from_items(items, days=30, user=u)
+    return out
+
+
+class TestStatesAndGrouping(unittest.TestCase):
+    """状态分组：15 个规则族必然全跑（覆盖清单），但只有命中的才进行动清单"""
+
+    def test_every_prescription_has_valid_state(self):
+        for key, (sig, rxs) in _all_account_runs().items():
+            for r in rxs:
+                self.assertIn(r["state"], pr.VALID_STATES,
+                              "%s %s 状态非法：%r" % (key, r["id"], r.get("state")))
+
+    def test_groups_partition_all_rules(self):
+        for key, (sig, rxs) in _all_account_runs().items():
+            g = pr.group_by_state(rxs)
+            self.assertEqual(len(rxs), len(pr.RULES), "%s：规则族数变了" % (key,))
+            self.assertEqual(sum(len(v) for v in g.values()), len(rxs),
+                             "%s：分组后有处方丢失" % (key,))
+
+    def test_negative_prescriptions_stay_out_of_action_list(self):
+        """「不是瓶颈/样本不足」的条目不得混进行动清单，否则清单又被撑回固定条数"""
+        for key, (sig, rxs) in _all_account_runs().items():
+            hits = set(pr.hit_ids(rxs))
+            self.assertEqual(hits, set(pr.hit_ids(rxs)), "%s：命中集合不稳定" % (key,))
+            for r in rxs:
+                if r["state"] != "alert":
+                    self.assertNotIn(r["id"], hits, "%s：%s 非命中却进了行动清单" % (key, r["id"]))
+
+    def test_every_rule_branch_declares_state(self):
+        """静态闸门：prescribe.py 里每个 _rx(...) 调用点都必须显式声明状态
+
+        漏标的分支只在真正跑到时才 TypeError——静态检查才拦得住没跑到的分支。
+        """
+        path = os.path.join(ROOT, "scripts", "prescribe.py")
+        with open(path, encoding="utf-8") as f:
+            src = f.read()
+        tree = ast.parse(src)
+        lines = src.splitlines()
+        missing, bad = [], []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "_rx":
+                if lines[node.lineno - 1].strip().startswith("def _rx"):
+                    continue
+                a = node.args
+                st = a[3].value if len(a) > 3 and isinstance(a[3], ast.Constant) else None
+                if st is None:
+                    missing.append(node.lineno)
+                elif st not in pr.VALID_STATES:
+                    bad.append((node.lineno, st))
+        self.assertEqual(missing, [], "这些 _rx 调用点没标状态：%s" % missing)
+        self.assertEqual(bad, [], "状态取值非法：%s" % bad)
+        self.assertGreaterEqual(len(pr.RULES), 10)
+
+    def test_markdown_sections_follow_states(self):
+        """处方单必须按状态分节呈现，且行动清单只收录命中项"""
+        sig, rxs = _all_account_runs()[("newbie", "演示账号甲")]
+        md = pr.render_md(sig, rxs)
+        self.assertIn("本期行动清单", md)
+        self.assertIn("已排除", md)
+        for r in rxs:
+            if r["state"] == "alert":
+                self.assertIn(r["id"], md[md.index("## 一、"):md.index("## 二、")] if "## 二、" in md else md)
+
+
+class TestAccountDifferentiation(unittest.TestCase):
+    """「换几个账号也要各自出不同的建议」——行动清单必须随账号变，否则演示就是套模板"""
+
+    def test_action_lists_differ_across_accounts(self):
+        seen = {}
+        for arch in demo_synth.ARCH_DEFAULTS:
+            for u in ("演示账号甲", "演示账号乙"):
+                rng = random.Random(demo_synth.seed_of(u))
+                items = demo_synth.gen(u, arch, demo_synth.ARCH_DEFAULTS[arch], rng)
+                sig, rxs = pr.prescribe_from_items(items, days=30, user=u)
+                seen[(arch, u)] = tuple(pr.hit_ids(rxs))
+        self.assertEqual(len(set(seen.values())), len(seen),
+                         "8 个账号应得到 8 套不同清单，实为 %d 套：%s" % (len(set(seen.values())), seen))
+        for arch in demo_synth.ARCH_DEFAULTS:
+            self.assertNotEqual(seen[(arch, "演示账号甲")], seen[(arch, "演示账号乙")],
+                                "%s：同原型只换用户名却得到同一份清单" % arch)
+        counts = set(len(v) for v in seen.values())
+        self.assertGreater(len(counts), 1, "命中条数恒定，说明清单没随账号变：%s" % counts)
+
+    def test_action_list_is_a_proper_subset(self):
+        """行动清单必须是规则族的真子集（不是「15 条换个顺序」）"""
+        rng = random.Random(demo_synth.seed_of("演示账号甲"))
+        items = demo_synth.gen("演示账号甲", "newbie", demo_synth.ARCH_DEFAULTS["newbie"], rng)
+        sig, rxs = pr.prescribe_from_items(items, days=30, user="演示账号甲")
+        hits = set(pr.hit_ids(rxs))
+        self.assertGreaterEqual(len(hits), 1)
+        self.assertLess(len(hits), len(pr.RULES))
+
+    def test_headline_differs_per_account(self):
+        hl = []
+        for arch in demo_synth.ARCH_DEFAULTS:
+            rng = random.Random(demo_synth.seed_of("演示账号甲"))
+            items = demo_synth.gen("演示账号甲", arch, demo_synth.ARCH_DEFAULTS[arch], rng)
+            sig, rxs = pr.prescribe_from_items(items, days=30, user="演示账号甲")
+            s = pr.summarize(sig, rxs)
+            self.assertEqual(s["alerts"], len(pr.hit_ids(rxs)))
+            hl.append(s["headline"])
+        self.assertGreater(len(set(hl)), 1, "结论句不应四个原型完全相同")
 
 
 if __name__ == "__main__":

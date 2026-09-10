@@ -63,6 +63,7 @@ def build_case(user, archetype, days):
         "archetype_label": {"polluted": "被历史爆款污染的老号", "vertical": "垂类深耕号",
                             "newbie": "新手号（样本少）"}.get(archetype, archetype),
         "days": days, "signals": sig, "prescriptions": rxs, "report_md": md,
+        "summary": pr.summarize(sig, rxs),
     }
 
 
@@ -111,6 +112,15 @@ PAGE = r"""<!DOCTYPE html>
   .card li{margin:3px 0;font-size:13.5px}
   .card .mod{color:var(--accent);font-size:13px;font-weight:600}
   .card .basis,.card .fals{color:var(--dim);font-size:12.5px;margin-top:6px}
+  .headline{background:rgba(94,177,255,.10);border:1px solid rgba(94,177,255,.42);border-radius:10px;
+    padding:9px 12px;margin:10px 0;font-size:13.5px}
+  .sec{margin:18px 0 0;font-size:15px;border-left:3px solid var(--accent);padding-left:9px}
+  .brief{display:flex;flex-direction:column;gap:8px;margin-top:10px}
+  .brow{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:9px 12px}
+  .brow .sig{font-size:13px;margin:5px 0}
+  .brow .act{color:var(--dim);font-size:12.5px}
+  .rest{margin-top:16px;border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+  .rest summary{cursor:pointer;color:var(--accent);font-size:13.5px}
   details{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 15px;margin-top:16px}
   summary{cursor:pointer;font-weight:600}
   .md{white-space:pre-wrap;word-break:break-word;font:13px/1.7 Consolas,"Courier New",monospace;
@@ -161,16 +171,32 @@ function rxCard(r){
     '<div class="fals">失效条件：'+inline(esc(r.falsify))+'</div></div>';
 }
 
+function briefList(list){
+  return '<div class="brief">'+list.map(r=>'<div class="brow"><b>'+esc(r.id)+" · "+inline(esc(r.title||""))+'</b>'+
+    '<div class="sig">'+inline(esc(r.signal))+'</div>'+
+    '<div class="act">→ 先做：'+inline(esc((r.actions||[])[0]||""))+'</div></div>').join("")+'</div>';
+}
+
 function renderCase(c){
-  const cnt={}; c.prescriptions.forEach(r=>cnt[r.severity]=(cnt[r.severity]||0)+1);
+  const g={alert:[],watch:[],unknown:[],ok:[],error:[]};
+  c.prescriptions.forEach(r=>{(g[r.state]||(g[r.state]=[])).push(r);});
   let h='<div class="sum"><span>账号：<b>'+esc(c.user)+'</b>（'+esc(c.archetype_label)+'）</span>'+
     '<span>样本：<b>'+c.signals.n_total+'</b> 条（近期窗口 <b>'+c.signals.n_recent+'</b> 条）</span>'+
     '<span>数据锚点：<b>'+esc(c.signals.span_last)+'</b></span>'+
-    '<span>处方：<b>'+c.prescriptions.length+'</b> 条（高 '+(cnt["高"]||0)+' / 中 '+(cnt["中"]||0)+' / 低 '+(cnt["低"]||0)+'）</span></div>';
+    '<span>规则族 <b>'+c.prescriptions.length+'</b> 条 → <b>行动 '+g.alert.length+'</b> · 观察 '+g.watch.length+
+    ' · 待补样本 '+g.unknown.length+' · 已排除 '+g.ok.length+'</span></div>';
   if(c.signals.n_recent < 8){
     h+='<div class="flag">近期窗口样本不足 8 条 → 引擎自动回退全量基线并已在报告内声明：节奏/稳定性类结论不可采信。</div>';
   }
-  h+='<div class="cards">'+c.prescriptions.map(rxCard).join("")+'</div>';
+  h+='<div class="headline">本账号本期结论：'+inline(esc((c.summary&&c.summary.headline)||""))+
+     '<div class="hint">规则族全跑是为了不漏检，进清单的只有真正命中的——换一个账号，条数与清单都会变。</div></div>';
+  h+='<h3 class="sec">一、本期行动清单（命中 '+g.alert.length+' 条）</h3>';
+  h+=g.alert.length?'<div class="cards">'+g.alert.map(rxCard).join("")+'</div>'
+    :'<p class="hint">本期无命中项——可比维度都落在正常区间。这不等于账号没问题，而是当前数据看不到异常。</p>';
+  if(g.watch.length) h+='<h3 class="sec">二、观察项（'+g.watch.length+' 条，弱信号）</h3>'+briefList(g.watch);
+  if(g.unknown.length) h+='<h3 class="sec">三、待补样本（'+g.unknown.length+' 条，测不出来就不给结论）</h3>'+briefList(g.unknown);
+  if(g.ok.length) h+='<details class="rest"><summary>四、已排除 '+g.ok.length+' 条——该维度不是当前瓶颈（点开看逐条结论）</summary>'+briefList(g.ok)+'</details>';
+  if(g.error.length) h+='<h3 class="sec">⚠ 引擎异常（'+g.error.length+' 条，属缺陷信号）</h3>'+briefList(g.error);
   h+='<details><summary>展开完整七节诊断报告</summary><div class="md">'+esc(c.report_md)+'</div></details>';
   return h;
 }
@@ -256,12 +282,11 @@ def main():
 
     print("[+] 离线预渲染 -> %s（%.0f KB）" % (path, os.path.getsize(path) / 1024.0))
     for c in cases:
-        cnt = {}
-        for r in c["prescriptions"]:
-            cnt[r["severity"]] = cnt.get(r["severity"], 0) + 1
-        print("    账号 %-14s %-12s 样本 %3d/%3d 处方 %2d 条（高%d/中%d/低%d）"
+        s = c["summary"]
+        print("    账号 %-14s %-12s 样本 %3d/%3d 规则族 %2d → 行动 %d / 观察 %d / 待补 %d / 已排除 %d"
               % (c["user"], c["archetype_label"], c["signals"]["n_recent"], c["signals"]["n_total"],
-                 len(c["prescriptions"]), cnt.get("高", 0), cnt.get("中", 0), cnt.get("低", 0)))
+                 len(c["prescriptions"]), s["alerts"], s["watch"], s["unknown"], s["cleared"]))
+        print("        清单：%s" % (", ".join(s["alert_ids"]) or "(本期无命中项)"))
     for p in pastes:
         print("    贴入 %-18s 得分 %s（%s）· M10 高 %d / 中 %d"
               % (p["_label"], p["score"], p["grade"], p["m10"]["high"], p["m10"]["medium"]))

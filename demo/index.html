@@ -59,6 +59,15 @@
   .flag{background:rgba(224,162,74,.12);border:1px solid rgba(224,162,74,.45);border-radius:10px;
        padding:10px 13px;font-size:13px;margin:12px 0}
   .note{color:var(--dim);font-size:12.5px;margin-top:8px}
+  .headline{background:rgba(94,177,255,.10);border:1px solid rgba(94,177,255,.42);border-radius:10px;
+    padding:9px 12px;margin:10px 0;font-size:13.5px}
+  .sec{margin:18px 0 0;font-size:15px;border-left:3px solid var(--accent);padding-left:9px}
+  .brief{display:flex;flex-direction:column;gap:8px;margin-top:10px}
+  .brow{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:9px 12px}
+  .brow .sig{color:#dbe4ee;font-size:13px;margin:5px 0}
+  .brow .act{color:var(--dim);font-size:12.5px}
+  .rest{margin-top:16px;border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+  .rest summary{cursor:pointer;color:var(--accent);font-size:13.5px}
   footer{margin-top:26px;padding-top:14px;border-top:1px solid var(--line);color:var(--dim);font-size:12.5px}
   .err{background:rgba(224,82,74,.12);border:1px solid rgba(224,82,74,.5);border-radius:10px;padding:12px 14px}
   .hide{display:none}
@@ -202,27 +211,58 @@ function rxCard(r){
     '</div>';
 }
 
+const STATE_LABEL = {alert:"本期行动清单", watch:"观察项（弱信号）", unknown:"待补样本（暂不出结论）",
+                     ok:"已排除（不是当前瓶颈）", error:"引擎异常"};
+const STATE_HINT = {alert:"命中异常信号 → 本期就动这几条",
+                    watch:"弱信号，够不上异常但值得盯",
+                    unknown:"样本不足，测不出来就不给结论",
+                    ok:"该维度不是当前瓶颈，压成一句带过",
+                    error:"规则执行异常，属缺陷信号而非数据结论"};
+
+function briefList(list){
+  return '<div class="brief">' + list.map(r =>
+    '<div class="brow"><b>' + esc(r.id) + ' · ' + inline(esc(r.title || "")) + '</b>' +
+    '<div class="sig">' + inline(esc(r.signal)) + '</div>' +
+    '<div class="act">→ 先做：' + inline(esc((r.actions||[])[0] || "")) + '</div></div>').join("") + '</div>';
+}
+
 async function runDiagnose(){
   const btn = $("btnDiag"); btn.disabled = true; $("diagOut").innerHTML = "<p class='hint'>生成中……（合成数据 → 七节诊断 → 信号 → 处方）</p>";
   try{
     const d = await post("/api/diagnose", {user: $("user").value, archetype: $("arch").value,
                                            days: +$("days").value});
     const s = d.summary || {};
-    const cnt = {};
-    d.prescriptions.forEach(r => cnt[r.severity] = (cnt[r.severity]||0)+1);
+    const g = {alert:[], watch:[], unknown:[], ok:[], error:[]};
+    d.prescriptions.forEach(r => { (g[r.state] || (g[r.state] = [])).push(r); });
     let html = '<div class="sum">' +
       '<span>账号：<b>' + esc(d.meta.user) + '</b>（' + esc(d.meta.archetype_label) + '）</span>' +
       '<span>样本：<b>' + d.meta.n_records + '</b> 条</span>' +
       '<span>窗口：近 <b>' + d.meta.days + '</b> 天</span>' +
       '<span>数据锚点：<b>' + esc(d.meta.time_anchor) + '</b></span>' +
-      '<span>处方：<b>' + d.prescriptions.length + '</b> 条（高 ' + (cnt["高"]||0) + ' / 中 ' + (cnt["中"]||0) + ' / 低 ' + (cnt["低"]||0) + '）</span>' +
+      '<span>规则族 <b>' + d.prescriptions.length + '</b> 条 → <b>行动 ' + g.alert.length + '</b>' +
+      ' · 观察 ' + g.watch.length + ' · 待补样本 ' + g.unknown.length + ' · 已排除 ' + g.ok.length + '</span>' +
       '<span>数据：<b>' + esc(d.meta.data_kind) + '</b></span></div>';
     if (d.signals && d.signals.n_recent < 8){
       html += '<div class="flag">近期窗口只有 <b>' + d.signals.n_recent + '</b> 条样本（少于 8 条阈值）→ 引擎已<b>自动回退到全量基线</b>，并在报告与每张处方里声明。此时节奏/稳定性类结论不可采信：把窗口调大，或换一个近期有更新的账号类型。</div>';
     } else if (d.signals){
       html += '<div class="note">基线口径：' + esc(d.signals.baseline_kind) + '（' + d.signals.baseline.n + ' 条）</div>';
     }
-    html += '<div class="cards">' + d.prescriptions.map(rxCard).join("") + '</div>';    html += '<details><summary>展开完整七节诊断报告（原始文本）</summary><div class="md">' +
+    html += '<div class="headline">本账号本期结论：' + inline(esc(s.headline || "")) +
+            '<div class="hint" style="margin-top:5px">换一个账号 / 原型再点一次，上面的条数与下面的清单都会变——' +
+            '规则族全跑是为了不漏检，进清单的只有真正命中的。</div></div>';
+    html += '<h3 class="sec">一、本期行动清单（命中 ' + g.alert.length + ' 条）<span class="hint">　' + STATE_HINT.alert + '</span></h3>';
+    html += g.alert.length
+      ? '<div class="cards">' + g.alert.map(rxCard).join("") + '</div>'
+      : '<p class="hint">本期无命中项——可比维度都落在正常区间。这不等于账号没问题，而是当前数据看不到异常。</p>';
+    if (g.watch.length)
+      html += '<h3 class="sec">二、观察项（' + g.watch.length + ' 条）<span class="hint">　' + STATE_HINT.watch + '</span></h3>' + briefList(g.watch);
+    if (g.unknown.length)
+      html += '<h3 class="sec">三、待补样本（' + g.unknown.length + ' 条）<span class="hint">　' + STATE_HINT.unknown + '</span></h3>' + briefList(g.unknown);
+    if (g.ok.length)
+      html += '<details class="rest"><summary>四、已排除 ' + g.ok.length + ' 条——' + STATE_HINT.ok + '（点开看逐条结论）</summary>' + briefList(g.ok) + '</details>';
+    if (g.error.length)
+      html += '<h3 class="sec">⚠ 引擎异常（' + g.error.length + ' 条）<span class="hint">　' + STATE_HINT.error + '</span></h3>' + briefList(g.error);
+    html += '<details><summary>展开完整七节诊断报告（原始文本）</summary><div class="md">' +
             renderMd(d.report_md) + '</div></details>';
     $("diagOut").innerHTML = html;
   }catch(e){
