@@ -1,0 +1,15 @@
+# 数据与产物目录不进公开库（红线：真实数据不上传）
+data/
+out/
+*.jsonl
+!评估/**/*.jsonl
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# 系统文件
+Thumbs.db
+.DS_Store
