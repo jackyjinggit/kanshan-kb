@@ -22,9 +22,27 @@ CTA_PATTERN = r"多关注|关注我|看专栏|也不花钱|不要钱|我的专�
 
 
 def load(path):
-    items = [json.loads(l) for l in open(path, encoding="utf-8") if l.strip()]
-    for it in items:
-        it["dt"] = datetime.datetime.fromtimestamp(int(it.get("CreatedAt") or 0))
+    """逐行读取：坏行跳过并计数（压力预案③：恶意/损坏输入优雅降级，不裸崩）；
+    CreatedAt<=0 的行无效（避免 1970 年污染年度分组）。"""
+    items, bad, epoch0 = [], 0, 0
+    with open(path, encoding="utf-8") as f:
+        for lineno, l in enumerate(f, 1):
+            if not l.strip():
+                continue
+            try:
+                it = json.loads(l)
+            except json.JSONDecodeError:
+                bad += 1
+                if bad <= 3:
+                    print("[!] 第 %d 行不是合法 JSON，已跳过（坏行降级不中断）" % lineno)
+                continue
+            if not isinstance(it, dict) or int(it.get("CreatedAt") or 0) <= 0:
+                epoch0 += 1
+                continue
+            it["dt"] = datetime.datetime.fromtimestamp(int(it["CreatedAt"]))
+            items.append(it)
+    if bad or epoch0:
+        print("[!] 已跳过：坏行 %d 行、CreatedAt 无效 %d 行（优雅降级）" % (bad, epoch0))
     return items
 
 
@@ -47,16 +65,23 @@ def main():
     ap.add_argument("--in", dest="src", default=os.path.join("data", "contents.jsonl"))
     ap.add_argument("--out", default="out")
     ap.add_argument("--days", type=int, default=60, help="近期窗口（天）")
+    ap.add_argument("--user", default=None, help="用户名（缺省取数据内 AuthorName，无则『未标注』）")
     a = ap.parse_args()
 
-    items = load(a.src)
+    try:
+        items = load(a.src)
+    except OSError as e:
+        print("[!] 读不了数据文件：%s" % e)
+        print("    先用 scripts/zhihu_fetch.py 拉取本人数据，或 scripts/demo_synth.py --user <任意用户名> 造测试数据")
+        return 1
     if not items:
-        print("[!] 无数据"); return 1
+        print("[!] 无有效数据（文件为空或全部行损坏）"); return 1
     os.makedirs(a.out, exist_ok=True)
     now = max(it["dt"] for it in items)
     recent = [it for it in items if (now - it["dt"]).days <= a.days]
 
-    L = ["# 看山诊断报告（生成 %s）" % datetime.date.today(),
+    user = (a.user or "").strip() or ((items[0].get("AuthorName") or "").strip() or "未标注")
+    L = ["# 看山诊断报告（用户：%s · 生成 %s）" % (user, datetime.date.today()),
          "数据源: %s（%d 条，%s ~ %s）" % (a.src, len(items),
                                           min(it["dt"] for it in items).date(), now.date()),
          ""]

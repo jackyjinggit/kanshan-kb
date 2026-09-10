@@ -15,10 +15,18 @@ CLI = os.path.join(os.environ.get("LOCALAPPDATA", "") or os.environ.get("HOME", 
 
 
 def fetch(offset, limit=50):
-    p = subprocess.run([CLI, "me", "contents", "--type", "all", "--sort", "ts",
-                        "--order", "desc", "--offset", str(offset), "--limit", str(limit)],
-                       capture_output=True, timeout=120)
-    return json.loads(p.stdout.decode("utf-8", errors="replace"))
+    try:
+        p = subprocess.run([CLI, "me", "contents", "--type", "all", "--sort", "ts",
+                            "--order", "desc", "--offset", str(offset), "--limit", str(limit)],
+                           capture_output=True, timeout=120)
+    except subprocess.TimeoutExpired:
+        return {"Code": -1, "Message": "zhihu-cli 超时（120s），稍后重试"}
+    except OSError as e:
+        return {"Code": -1, "Message": "zhihu-cli 启动失败：%s" % e}
+    try:
+        return json.loads(p.stdout.decode("utf-8", errors="replace"))
+    except json.JSONDecodeError:
+        return {"Code": -1, "Message": "zhihu-cli 输出不是 JSON——大概率未授权，请先执行 zhihu-cli auth set --secret-stdin"}
 
 
 def main():
@@ -27,6 +35,11 @@ def main():
     ap.add_argument("--max-pages", type=int, default=40)
     a = ap.parse_args()
 
+    if not os.path.exists(CLI):
+        print("[!] 未找到 zhihu-cli：%s" % CLI)
+        print("    请先安装 zhihu-cli 并完成授权：zhihu-cli auth set --secret-stdin（详见 README 快速开始）")
+        return 1
+
     os.makedirs(os.path.dirname(a.out) or ".", exist_ok=True)
     items, offset, page = [], 0, 0
     while page < a.max_pages:
@@ -34,6 +47,9 @@ def main():
         d = fetch(offset)
         if d.get("Code") != 0:
             print("[!] API error:", d.get("Message"))
+            msg = str(d.get("Message") or "")
+            if "auth" in msg.lower() or "token" in msg.lower() or "401" in msg:
+                print("    授权提示：zhihu-cli auth set --secret-stdin 后重跑本脚本")
             break
         data = d.get("Data") or {}
         batch = data.get("Items") or []
