@@ -66,15 +66,17 @@ REAL_DIR = os.path.join(ROOT, "data", "real")
 
 
 def _account_from_path(path, label=""):
-    """一个真实账号 = 一份 jsonl。id 用文件名（唯一），默认标签从文件名推导：contents_<名>_<YYYYMMDD>.jsonl"""
+    """一个真实账号 = 一份 jsonl。id 用文件名（唯一）。
+    没给名字时**不拿文件名当人名用**，一律叫「本人账号」，文件名标签只作括号里的区分：
+    contents_zhihu_20260910.jsonl → 「本人账号（zhihu）」；同页多账号时靠这个括号分得清。"""
     p = os.path.abspath(path)
     base = os.path.basename(p)
     stem = base[:-6] if base.endswith(".jsonl") else base
     if stem.startswith("contents_"):
         stem = stem[len("contents_"):]
     m = re.match(r"^(?P<name>.+?)_(?P<d>\d{8})$", stem)
-    derived = ("%s（%s-%s-%s）" % (m.group("name"), m.group("d")[:4], m.group("d")[4:6], m.group("d")[6:])
-               if m else stem) or "本人账号"
+    tag = (m.group("name") if m else stem).strip()
+    derived = "本人账号（%s）" % tag if tag else "本人账号"
     return {"id": base, "path": p, "label": (label or derived)[:40],
             "cache": None, "mtime": 0.0, "bad": 0, "n": 0, "newest": ""}
 
