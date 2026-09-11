@@ -267,6 +267,7 @@ def extract(items, days=30, source="", user=""):
         "title_style": title_style,
         "article_share": sum(1 for it in recent if it.get("ContentType") == "article") / len(recent),
         "comment_share": comment_share,
+        "comment_mean_recent": (sum((it.get("CommentCount") or 0) for it in recent) / len(recent)) if recent else 0.0,
         "stability": stability,
         "stability_cv": cv,
         "weekday": weekday,
