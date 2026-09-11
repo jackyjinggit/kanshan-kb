@@ -275,7 +275,7 @@ class Handler(BaseHTTPRequestHandler):
                     "is_example": is_ex,
                     "note": "规则由设计组填；把文件放到 scripts/rules/content_rules.json 即自动接管，无需改代码",
                 },
-                "archetypes": real_archetypes() if REAL["accounts"] else ARCHETYPES,
+                "archetypes": real_archetypes(),
                 "severity_hint": SEVERITY_HINT,
                 "data_source": real_source(),
                 "disclaimer": (
@@ -410,6 +410,7 @@ def main():
         return 2
 
     httpd = ThreadingHTTPServer((a.host, a.port), Handler)
+    httpd.request_queue_size = 128          # 默认 5：高并发突刺时 accept 队列溢出，Windows 下直接拒连（压测 2026-09-11 实测）
     url = "http://%s:%d/" % (a.host, a.port)
     print("=" * 62)
     print(" 看山 · 本地演示网关已启动（离线，不访问网络）")
