@@ -7,6 +7,13 @@
   小时级曲线（signals.py 口径红线同样声明）。本脚本用「定时采样 + 差分」近似出小时级
   增量——纯本地、只调开放平台免费额度、不推断平台没有的指标。
 
+频率口径（2026-09-11 实测 quota）：
+  采样走 user_data 接口（TotalQuota 10000）。恒定 5 分钟调度 = 288 次/天，赛期一周
+  约 2000 次，额度无忧——无需节流，每轮必采；真正紧张的额度是现场演示要用的
+  直答/创作/热榜（各 100 次），别拿它们做高频轮询。
+  「发布即抓首点」：发布后手动 `python scripts/sampler.py --once` 即拿第 0 分钟数据点，
+  之后计划任务自动 5 分钟跟踪。
+
 用法：
     python scripts/sampler.py --once                       # 单次采样（追加快照行）
     python scripts/sampler.py --once --limit 20            # 只采样最近 20 篇
@@ -66,6 +73,7 @@ def sample_once(out_path, limit):
         return 1
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     ts = int(time.time())
+    created_max = max((int(i.get("CreatedAt") or 0) for i in items), default=0)
     n = 0
     with open(out_path, "a", encoding="utf-8") as f:
         for it in items:
@@ -79,6 +87,7 @@ def sample_once(out_path, limit):
                 "like": it.get("LikeCount") or 0,
                 "comment": it.get("CommentCount") or 0,
                 "favorite": it.get("FavoriteCount") or 0,
+                "created_max": created_max,
             }, ensure_ascii=False) + "\n")
             n += 1
     print("[+] %s 采样 %d 篇 -> %s" % (
