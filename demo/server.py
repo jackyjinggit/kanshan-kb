@@ -37,10 +37,13 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
 
 import content_analyze as ca        # noqa: E402
+import cards as cd                  # noqa: E402
 import demo_synth as ds             # noqa: E402
 import prescribe as pr              # noqa: E402
 import signals as sg                # noqa: E402
 import zhihu_diagnose as zd         # noqa: E402
+
+SNAP_PATH = os.path.join(ROOT, "data", "samples", "snapshots.jsonl")
 
 MAX_BODY = 4 * 1024 * 1024
 MAX_TEXT = 200000
@@ -321,6 +324,35 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, dict(build_diagnosis(user, arche, days, n), ok=True))
             except Exception as e:                      # 演示不裸崩：错误也要是可读的
                 return self._send(500, {"ok": False, "error": "诊断失败：%s" % e})
+
+        if path == "/api/cards":
+            """三卡（月/周/日）：与诊断同引擎同种子，输出卡片结构供前端可视化。"""
+            arche = str(data.get("archetype") or "polluted")
+            if arche not in ARCHETYPES:
+                return self._send(400, {"ok": False, "error": "未知账号类型：%s" % arche})
+            user = (str(data.get("user") or "").strip() or "演示账号")[:32]
+            try:
+                days = max(7, min(365, int(data.get("days") or 30)))
+            except (TypeError, ValueError):
+                days = 30
+            try:
+                n = max(20, min(400, int(data.get("n") or ds.ARCH_DEFAULTS.get(arche, 240))))
+            except (TypeError, ValueError):
+                n = ds.ARCH_DEFAULTS.get(arche, 240)
+            try:
+                rng = random.Random(ds.seed_of(user))
+                items = ds.gen(user, arche, n, rng)
+                items, _ = sg.attach_dt(items)
+                sig = sg.extract(items, days=days, user=user)
+                goal = str(data.get("goal") or "").strip()[:80]
+                return self._send(200, {
+                    "ok": True,
+                    "month": cd.month_card(sig, goal),
+                    "week": cd.week_card(items, sig),
+                    "day": cd.day_card(SNAP_PATH, user),
+                })
+            except Exception as e:
+                return self._send(500, {"ok": False, "error": "三卡组装失败：%s" % e})
 
         if path == "/api/analyze":
             text = data.get("text") or ""

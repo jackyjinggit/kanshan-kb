@@ -94,6 +94,7 @@
 <div class="tabs">
   <div class="tab on" id="tabA" data-pane="paneA">① 账号诊断</div>
   <div class="tab" id="tabB" data-pane="paneB">② 贴入式内容分析</div>
+  <div class="tab" id="tabC" data-pane="paneC">③ 三卡视图（月/周/日）</div>
 </div>
 
 <main>
@@ -130,6 +131,19 @@
     <textarea id="pText" placeholder="把要分析的内容整段贴进来（标题、正文均可）……&#10;&#10;不需要账号授权，不需要登录，不读取任何本地文件。"></textarea>
     <div class="note">边界：纯空白 / 无正文无法分析；正文超过 2 万字只分析前 2 万字并在报告中标注；本工具不做平台违规判定，只做风险自查提示。</div>
     <div id="anOut"></div>
+  </section>
+
+  <!-- ===== 入口三：三卡视图（月/周/日） ===== -->
+  <section id="paneC" class="hide">
+    <div class="row">
+      <label>账号名</label>
+      <input id="cUser" value="演示账号" style="width:130px">
+      <label>半年目标（可选）</label>
+      <input id="cGoal" placeholder="例如：半年内成为垂类 Top10" style="width:240px">
+      <button id="btnCards">生成三卡</button>
+    </div>
+    <div class="hint">三卡 = 产品核心「月看方向 / 周看节奏 / 日看窗口」。月卡与周卡基于同一合成引擎（与账号诊断同种子）；日卡优先加载 <code>data/samples/</code> 的<b>真实采样曲线</b>（scripts/sampler.py 差分），无采样时显示合成示例并标注。</div>
+    <div id="cardsOut"></div>
   </section>
 
   <footer id="status">正在读取引擎状态……</footer>
@@ -386,6 +400,88 @@ document.querySelectorAll("[data-demo]").forEach(b => b.onclick = () => {
 });
 $("btnDiag").onclick = runDiagnose;
 $("btnAnalyze").onclick = runAnalyze;
+
+// ===== 入口三：三卡视图（月/周/日） =====
+function barChart(days7){
+  const max = Math.max(1, ...days7.map(d => d.interact));
+  return '<div style="display:flex;align-items:flex-end;gap:6px;height:120px;margin:10px 0">' +
+    days7.map(d => {
+      const h = Math.round(d.interact / max * 100);
+      return '<div style="flex:1;text-align:center" title="' + esc(d.date + ' ' + d.weekday + ' · ' + d.interact) + '">' +
+        '<div style="font-size:11px;color:var(--dim)">' + (d.interact || '') + '</div>' +
+        '<div style="height:' + Math.max(h, 2) + 'px;background:' + (d.interact ? 'var(--accent)' : 'var(--line)') +
+        ';border-radius:3px 3px 0 0"></div>' +
+        '<div style="font-size:11px;margin-top:3px">' + esc(d.weekday) + '</div></div>';
+    }).join('') + '</div>';
+}
+function dayCurve(points){
+  const W = 640, H = 150, pad = 8;
+  if (!points || points.length < 2) return '<div class="hint">采样点不足，曲线随采样轮数变厚。</div>';
+  const maxL = Math.max(...points.map(p => p.like), 1);
+  const minL = Math.min(...points.map(p => p.like));
+  const span = Math.max(maxL - minL, 1), tMax = points[points.length - 1].t || 1;
+  const X = t => pad + t / tMax * (W - 2 * pad);
+  const Y = v => H - pad - (v - minL) / span * (H - 2 * pad);
+  const poly = points.map(p => X(p.t).toFixed(1) + ',' + Y(p.like).toFixed(1)).join(' ');
+  const dots = points.map(p => '<circle cx="' + X(p.t).toFixed(1) + '" cy="' + Y(p.like).toFixed(1) +
+    '" r="2.5" fill="var(--accent)"><title>' + esc(p.clock + ' · 累计赞 ' + p.like) + '</title></circle>').join('');
+  return '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;max-width:' + W + 'px;background:var(--panel2);border:1px solid var(--line);border-radius:8px">' +
+    '<polyline points="' + poly + '" fill="none" stroke="var(--accent)" stroke-width="2"/>' + dots + '</svg>';
+}
+function renderCards(d){
+  const m = d.month, w = d.week, c = d.day;
+  let html = '';
+  // 月卡
+  html += '<div class="flag"><b>月卡 · 月看方向</b>（' + esc(m.goal.text) + '）</div>';
+  html += '<div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap;margin:10px 0">' +
+    '<div style="font-size:44px;font-weight:700;color:var(--accent)">' + m.goal.score + '<span style="font-size:14px;color:var(--dim)">/100 目标对齐</span></div>' +
+    '<div style="font-size:13px;color:var(--dim)">聚焦 ' + m.goal.factors.topic_focus + ' · 稳定 ' + m.goal.factors.stability +
+    ' · 节奏 ' + m.goal.factors.cadence + '｜风格稳定性指数 ' + m.stability + '/100</div></div>';
+  html += '<div class="hint" style="margin-top:-6px">' + esc(m.goal.note) + '</div>';
+  html += '<h3>本月最有效动作 Top3</h3><table class="table"><thead><tr><th>动作</th><th>互动均值</th></tr></thead><tbody>' +
+    m.top_actions.map(a => '<tr><td>' + esc(a.action) + '</td><td>' + a.interact_mean + '</td></tr>').join('') +
+    (m.worst_action ? '<tr><td>⚠️ 最差：' + esc(m.worst_action.action) + '</td><td>' + m.worst_action.interact_mean + '</td></tr>' : '') +
+    '</tbody></table>';
+  html += '<div class="note">下月调整：' + esc(m.next_step) + '</div>';
+  // 周卡
+  html += '<div class="flag" style="margin-top:18px"><b>周卡 · 周看节奏</b></div>';
+  html += barChart(w.days7);
+  html += '<div class="note">本周最好一天：' + esc(w.best_day ? w.best_day.weekday + '（' + w.best_day.date + '，互动 ' + w.best_day.interact + '）' : '—') +
+    '｜最有效形态：' + esc(w.top_type ? w.top_type.type + '（均值 ' + w.top_type.interact_mean + '）' : '样本不足') + '</div>';
+  html += '<div class="note">节奏建议：' + esc(w.rhythm) + '</div>';
+  html += '<div class="hint">' + esc(w.opportunities_note) + '</div>';
+  // 日卡
+  const realBadge = c.source === 'real' ? '<span class="badge b-高">真实采样</span>' : '<span class="badge b-中">合成·演示</span>';
+  html += '<div class="flag" style="margin-top:18px"><b>日卡 · 日看窗口（发布后 24h 陪跑）</b> ' + realBadge + '</div>';
+  html += '<div class="hint">' + esc(c.source_label) + '</div>';
+  html += dayCurve(c.points);
+  html += '<div class="note">分发节点先验：' + c.nodes.map(n => esc(n.hour + ':00 ' + n.label)).join(' ｜ ') + '</div>';
+  if (c.velocity) html += '<div class="note">⚡ ' + esc(c.velocity.note) + '（+' + c.velocity.delta + '）</div>';
+  if (c.attributions && c.attributions.length) {
+    html += '<h3>归因（涨跌 + 原因 + 可信度）</h3><table class="table"><thead><tr><th>时间</th><th>增量</th><th>原因</th><th>可信度</th></tr></thead><tbody>' +
+      c.attributions.map(a => '<tr><td>' + esc(a.clock) + '</td><td>+' + a.delta + '</td><td>' + esc(a.cause) + '</td><td>' + esc(a.confidence) + '</td></tr>').join('') +
+      '</tbody></table>';
+  } else {
+    html += '<div class="note">窗口内计数零变化——不硬编归因，曲线随采样天数变厚。</div>';
+  }
+  html += '<div class="note"><b>下一步</b>：' + esc(c.next_action) + '</div>';
+  html += '<div class="hint">失效条件：' + esc(c.falsify) + '</div>';
+  $("cardsOut").innerHTML = html;
+}
+async function runCards(){
+  const btn = $("btnCards");
+  btn.disabled = true; btn.textContent = "组装三卡中……";
+  try {
+    const d = await post("/api/cards", {user: $("cUser").value, archetype: archSel,
+                                        days: daySel, goal: $("cGoal").value});
+    renderCards(d);
+  } catch (e) {
+    $("cardsOut").innerHTML = '<div class="flag">三卡组装失败：' + esc(String(e.message || e)) + '</div>';
+  } finally {
+    btn.disabled = false; btn.textContent = "生成三卡";
+  }
+}
+$("btnCards").onclick = runCards;
 
 (async function init(){
   renderDays();
