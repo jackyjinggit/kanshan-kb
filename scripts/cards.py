@@ -18,11 +18,13 @@
     cards.week_card(items, sig)
     cards.day_card(snap_path=..., seed_user=...)
 """
+import argparse
 import datetime
 import json
 import os
 import random
 import statistics
+import subprocess
 
 SCHEMA = "kanshan.cards/1"
 # 分发节点先验（社区通用节奏，非平台官方承诺；日卡里作为标注线呈现）
@@ -155,6 +157,57 @@ def _synth_series(seed_user, hours=24, base=40):
         like += bump + rng.choice((0, 0, 0, 1, 2))  # 基线自然增长
         points.append({"t": h, "like": like, "clock": "%02d:00" % ((base_hour + h) % 24)})
     return points, "合成演示内容"
+
+
+CLI_PATH = os.path.join(os.environ.get("LOCALAPPDATA", "") or os.environ.get("HOME", ""),
+                        "ZhihuCLI", "current", "zhihu-cli.exe")
+
+
+def opportunity_card(topic_query, limit=6):
+    """周卡机会分：用官方 search API 查同题供给密度（每次调用花 1 次 zhihu_search 额度，按需触发）。
+
+    口径声明：设计参考的「缺口值 = 浏览数/回答数」需要浏览数——官方 search 不返回浏览数，
+    故本卡降级为「同题供给密度」口径：结果少=供给缺口（蓝海）；结果多且高赞集中=竞争激烈。
+    判定是启发式，非平台官方指标——失效条件见返回体。
+    """
+    if not topic_query or not topic_query.strip():
+        return {"schema": SCHEMA, "card": "opportunity", "error": "缺少选题关键词"}
+    topic_query = topic_query.strip()[:60]
+    if not os.path.exists(CLI_PATH):
+        return {"schema": SCHEMA, "card": "opportunity", "error": "未找到 zhihu-cli，机会分需官方搜索 API（待连接）"}
+    try:
+        p = subprocess.run([CLI_PATH, "search", "zhihu", "--query", topic_query,
+                            "--count", str(limit)], capture_output=True, timeout=60)
+    except (subprocess.TimeoutExpired, OSError) as e:
+        return {"schema": SCHEMA, "card": "opportunity", "error": "搜索失败：%s" % str(e)[:80]}
+    try:
+        d = json.loads(p.stdout.decode("utf-8", errors="replace"))
+    except json.JSONDecodeError:
+        return {"schema": SCHEMA, "card": "opportunity", "error": "搜索输出异常（检查授权）"}
+    if d.get("Code") != 0:
+        return {"schema": SCHEMA, "card": "opportunity", "error": "API error: %s" % d.get("Message")}
+    items = (d.get("Data") or {}).get("Items") or []
+    ups = sorted(((it.get("VoteUpCount") or 0) for it in items), reverse=True) if items else []
+    top = ups[0] if ups else 0
+    n = len(items)
+    if n == 0:
+        verdict, advice = "蓝海", "站内几乎无同题——值得写，但先确认需求真实存在（搜索词换 2-3 个变体再核一次）"
+    elif n <= 2 and top < 500:
+        verdict, advice = "供给缺口", "同题少且无高赞垄断——可写，角度选你的实证经验切入"
+    elif top >= 2000:
+        verdict, advice = "头部垄断", "已有高赞标杆——除非有显著增量信息，否则换子角度或升级问题粒度"
+    else:
+        verdict, advice = "可竞争", "有供给无垄断——拼角度差异化与开头钩子（M3 选题矩阵过一遍再动笔）"
+    return {
+        "schema": SCHEMA, "card": "opportunity",
+        "query": topic_query, "found": n, "top_upvote": top,
+        "titles": [{"title": (it.get("Title") or "")[:60],
+                    "upvote": it.get("VoteUpCount") or 0,
+                    "type": it.get("ContentType") or ""} for it in items[:limit]],
+        "verdict": verdict, "advice": advice,
+        "note": "口径=同题供给密度（官方 search 不返回浏览数，缺口值降级）；每次查询花 1 次 zhihu_search 额度",
+        "falsify": "判定阈值（0/2/2000）为启发式初值，用你账号的后续表现复核后应再校准",
+    }
 
 
 def day_card(snap_path=None, seed_user="演示账号"):

@@ -354,6 +354,14 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 return self._send(500, {"ok": False, "error": "三卡组装失败：%s" % e})
 
+        if path == "/api/opportunities":
+            """周卡机会分：官方 search 查同题供给密度（每次花 1 次 zhihu_search 额度，按钮触发才调）。"""
+            topic = str(data.get("topic") or "").strip()
+            try:
+                return self._send(200, dict(cd.opportunity_card(topic), ok=True))
+            except Exception as e:
+                return self._send(500, {"ok": False, "error": "机会分查询失败：%s" % e})
+
         if path == "/api/analyze":
             text = data.get("text") or ""
             if not isinstance(text, str):

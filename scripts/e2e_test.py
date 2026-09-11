@@ -240,6 +240,59 @@ def check_demo_server():
             proc.kill()
 
 
+def check_cards():
+    """三卡视图（月/周/日）：/api/cards 端点结构 + 双源口径 + 前端挂载。
+    验收口径：①月卡含目标对齐分与三因子 ②周卡 7 天切片 ③日卡 source∈{real,synth}
+    且 points ≥2 ④页面含三卡 tab 与 /api/cards 调用。"""
+    port = _free_port()
+    proc = subprocess.Popen([PY, os.path.join(ROOT, "demo", "server.py"),
+                             "--port", str(port), "--no-browser"],
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, cwd=ROOT)
+    base = "http://127.0.0.1:%d" % port
+
+    def call(path, payload=None):
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8") if payload is not None else None
+        req = urllib.request.Request(base + path, data=data,
+                                     headers={"Content-Type": "application/json; charset=utf-8"})
+        with urllib.request.urlopen(req, timeout=60) as r:
+            return r.status, json.loads(r.read().decode("utf-8"))
+
+    try:
+        for _ in range(40):
+            try:
+                if call("/api/health")[0] == 200:
+                    break
+            except Exception:
+                time.sleep(0.25)
+        else:
+            return ("三卡视图（月/周/日）", False, "30 秒内未就绪")
+
+        st, c = call("/api/cards", {"user": "三卡验收", "archetype": "vertical",
+                                    "days": 30, "goal": "垂类 Top10"})
+        m, w, d = c.get("month", {}), c.get("week", {}), c.get("day", {})
+        ok_api = (st == 200 and c.get("ok")
+                  and isinstance(m.get("goal", {}).get("score"), int)
+                  and len(m.get("goal", {}).get("factors", {})) == 3
+                  and len(w.get("days7", [])) == 7
+                  and d.get("source") in ("real", "synth")
+                  and len(d.get("points", [])) >= 2
+                  and isinstance(d.get("nodes"), list) and len(d["nodes"]) == 3)
+        body = urllib.request.urlopen(base + "/", timeout=10).read()
+        ok_fe = "三卡视图" .encode("utf-8") in body and b"/api/cards" in body
+        return ("三卡视图（月/周/日）", ok_api and ok_fe,
+                "api=%s 月分=%s 周7天=%s 日卡=%s(%d点) 前端挂载=%s"
+                % (st, m.get("goal", {}).get("score"), len(w.get("days7", [])),
+                   d.get("source"), len(d.get("points", [])), ok_fe))
+    except Exception as e:
+        return ("三卡视图（月/周/日）", False, "异常：%s" % str(e)[:90])
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+
 def check_gateway_real_data():
     """真实数据模式（多账号并存）：本机 zhihu-cli 拉取的 jsonl 走同一套引擎，一个文件 = 一个账号。
     顺带把已踩过的坑钉成闸门：①页面不得再用原生 <select>（会被下方按钮盖住、白底白字）
@@ -474,6 +527,7 @@ def main():
     record(*check_rules_slot(WORK, run))
     record(*check_account_differentiation(WORK, run))
     record(*check_demo_server())
+    record(*check_cards())
     record(*check_gateway_real_data())
     record(*check_unit_suite(run))
 

@@ -449,6 +449,9 @@ function renderCards(d){
   html += '<div class="note">本周最好一天：' + esc(w.best_day ? w.best_day.weekday + '（' + w.best_day.date + '，互动 ' + w.best_day.interact + '）' : '—') +
     '｜最有效形态：' + esc(w.top_type ? w.top_type.type + '（均值 ' + w.top_type.interact_mean + '）' : '样本不足') + '</div>';
   html += '<div class="note">节奏建议：' + esc(w.rhythm) + '</div>';
+  html += '<div class="row" style="margin:8px 0"><label>机会分（选题关键词）</label>' +
+    '<input id="oppTopic" placeholder="例如：大模型微调 实践" style="width:220px">' +
+    '<button id="btnOpp" class="ghost">查同题供给（花 1 次搜索额度）</button></div><div id="oppOut"></div>';
   html += '<div class="hint">' + esc(w.opportunities_note) + '</div>';
   // 日卡
   const realBadge = c.source === 'real' ? '<span class="badge b-高">真实采样</span>' : '<span class="badge b-中">合成·演示</span>';
@@ -482,6 +485,30 @@ async function runCards(){
   }
 }
 $("btnCards").onclick = runCards;
+
+// 机会分：按钮触发才花搜索额度（按需，不随三卡自动调）
+$("btnOpp").onclick = async () => {
+  const topic = $("oppTopic").value.trim();
+  if (!topic) { $("oppOut").innerHTML = '<div class="hint">先填选题关键词。</div>'; return; }
+  const btn = $("btnOpp");
+  btn.disabled = true; btn.textContent = "搜索中……";
+  try {
+    const d = await post("/api/opportunities", {topic: topic});
+    if (d.error) { $("oppOut").innerHTML = '<div class="hint">' + esc(d.error) + '</div>'; return; }
+    let html = '<div class="note"><b>判定：' + esc(d.verdict) + '</b>（同题 ' + d.found + ' 篇 · 最高赞 ' + d.top_upvote + '）—— ' + esc(d.advice) + '</div>';
+    if (d.titles && d.titles.length) {
+      html += '<table class="table"><thead><tr><th>同题内容</th><th>类型</th><th>赞</th></tr></thead><tbody>' +
+        d.titles.map(t => '<tr><td>' + esc(t.title) + '</td><td>' + esc(t.type) + '</td><td>' + t.upvote + '</td></tr>').join('') +
+        '</tbody></table>';
+    }
+    html += '<div class="hint">' + esc(d.note) + '｜失效条件：' + esc(d.falsify) + '</div>';
+    $("oppOut").innerHTML = html;
+  } catch (e) {
+    $("oppOut").innerHTML = '<div class="hint">查询失败：' + esc(String(e.message || e)) + '</div>';
+  } finally {
+    btn.disabled = false; btn.textContent = "查同题供给（花 1 次搜索额度）";
+  }
+};
 
 (async function init(){
   renderDays();
