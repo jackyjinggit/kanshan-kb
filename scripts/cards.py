@@ -163,6 +163,83 @@ CLI_PATH = os.path.join(os.environ.get("LOCALAPPDATA", "") or os.environ.get("HO
                         "ZhihuCLI", "current", "zhihu-cli.exe")
 
 
+def _load_secret():
+    """Access Secret：env ZHIHU_ACCESS_SECRET > demo/secret.txt。只留服务端，绝不进前端/日志。"""
+    v = os.environ.get("ZHIHU_ACCESS_SECRET", "").strip()
+    if v:
+        return v
+    p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                     "demo", "secret.txt")
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
+def _official_search_http(query, limit):
+    """官方 HTTP 直调 zhihu_search（CLI 不存在的部署场景，如 Render 容器）。
+    端点/鉴权口径=官方 skill 0.5.3-beta references/http-api.md（一手）：
+    GET developer.zhihu.com/api/v1/content/zhihu_search?Query=&Count=
+    Header: Bearer <secret> + X-Request-Timestamp（秒级）。Count 最大 10。
+    """
+    import time as _t
+    import urllib.request
+    import urllib.parse
+    import urllib.error
+    secret = _load_secret()
+    if not secret:
+        return {"schema": SCHEMA, "card": "opportunity",
+                "error": "未找到 zhihu-cli 且未配置 Access Secret（env ZHIHU_ACCESS_SECRET 或 demo/secret.txt）——机会分需官方搜索 API（待连接）"}
+    url = ("https://developer.zhihu.com/api/v1/content/zhihu_search?"
+           + urllib.parse.urlencode({"Query": query, "Count": min(10, max(1, limit))}))
+    req = urllib.request.Request(url, headers={
+        "Authorization": "Bearer " + secret,
+        "X-Request-Timestamp": str(int(_t.time())),
+        "Content-Type": "application/json",
+        "User-Agent": "kanshan-demo/0.1",
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            d = json.loads(r.read().decode("utf-8", "replace"))
+    except urllib.error.HTTPError as e:
+        try:
+            d = json.loads(e.read().decode("utf-8", "replace"))
+        except Exception:
+            return {"schema": SCHEMA, "card": "opportunity", "error": "官方搜索 HTTP %d" % e.code}
+    except Exception as e:
+        return {"schema": SCHEMA, "card": "opportunity", "error": "官方搜索不可达：%s" % str(e)[:80]}
+    if d.get("Code") != 0:
+        return {"schema": SCHEMA, "card": "opportunity", "error": "API error: %s" % d.get("Message")}
+    items = (d.get("Data") or {}).get("Items") or []
+    return _opportunity_from_items(query, items)
+
+
+def _opportunity_from_items(query, items):
+    """search 结果 → 机会分判定（与 CLI 路径同一口径）。"""
+    ups = sorted(((it.get("VoteUpCount") or 0) for it in items), reverse=True) if items else []
+    top = ups[0] if ups else 0
+    n = len(items)
+    if n == 0:
+        verdict, advice = "蓝海", "站内几乎无同题——值得写，但先确认需求真实存在（搜索词换 2-3 个变体再核一次）"
+    elif n <= 2 and top < 500:
+        verdict, advice = "供给缺口", "同题少且无高赞垄断——可写，角度选你的实证经验切入"
+    elif top >= 2000:
+        verdict, advice = "头部垄断", "已有高赞标杆——除非有显著增量信息，否则换子角度或升级问题粒度"
+    else:
+        verdict, advice = "可竞争", "有供给无垄断——拼角度差异化与开头钩子（M3 选题矩阵过一遍再动笔）"
+    return {
+        "schema": SCHEMA, "card": "opportunity",
+        "query": query, "found": n, "top_upvote": top,
+        "titles": [{"title": (it.get("Title") or "")[:60],
+                    "upvote": it.get("VoteUpCount") or 0,
+                    "type": it.get("ContentType") or ""} for it in items[:6]],
+        "verdict": verdict, "advice": advice,
+        "note": "口径=同题供给密度（官方 search 不返回浏览数，缺口值降级）；每次查询花 1 次 zhihu_search 额度",
+        "falsify": "判定阈值（0/2/2000）为启发式初值，用你账号的后续表现复核后应再校准",
+    }
+
+
 def opportunity_card(topic_query, limit=6):
     """周卡机会分：用官方 search API 查同题供给密度（每次调用花 1 次 zhihu_search 额度，按需触发）。
 
@@ -174,7 +251,7 @@ def opportunity_card(topic_query, limit=6):
         return {"schema": SCHEMA, "card": "opportunity", "error": "缺少选题关键词"}
     topic_query = topic_query.strip()[:60]
     if not os.path.exists(CLI_PATH):
-        return {"schema": SCHEMA, "card": "opportunity", "error": "未找到 zhihu-cli，机会分需官方搜索 API（待连接）"}
+        return _official_search_http(topic_query, limit)  # 云端/无 CLI 部署：官方 HTTP 直调
     try:
         p = subprocess.run([CLI_PATH, "search", "zhihu", "--query", topic_query,
                             "--count", str(limit)], capture_output=True, timeout=60)
