@@ -350,6 +350,39 @@ class Handler(BaseHTTPRequestHandler):
             return headers, "oauth-visitor"
         return headers, "self"
 
+
+    _QUOTA_CACHE = [0.0, "{}"]
+
+    def _quota(self):
+        """官方 /api/v1/quota 直调（额度查询本身不耗业务额度，300s 缓存）。"""
+        import time as _t
+        import urllib.request
+        import urllib.error
+        now = _t.time()
+        if now - self._QUOTA_CACHE[0] < 300:
+            return self._send(200, self._QUOTA_CACHE[1])
+        secret = cd._load_secret()
+        if not secret:
+            return self._send(200, {"Code": 20001, "Message": "未配置 Access Secret"})
+        req = urllib.request.Request("https://developer.zhihu.com/api/v1/quota", headers={
+            "Authorization": "Bearer " + secret,
+            "X-Request-Timestamp": str(int(now)),
+            "Content-Type": "application/json",
+            "User-Agent": "kanshan-demo/0.1"})
+        try:
+            with urllib.request.urlopen(req, timeout=15) as r:
+                body = r.read().decode("utf-8", "replace")
+            self._QUOTA_CACHE[0] = now
+            self._QUOTA_CACHE[1] = body
+            return self._send(200, body)
+        except urllib.error.HTTPError as e:
+            try:
+                return self._send(200, e.read().decode("utf-8", "replace"))
+            except Exception:
+                return self._send(200, {"Code": e.code, "Message": "quota HTTP %d" % e.code})
+        except Exception as e:
+            return self._send(200, {"Code": 90001, "Message": "quota 不可达: %s" % str(e)[:80]})
+
     def do_GET(self):
         path = self.path.split("?", 1)[0]
         if path in ("/", "/index.html"):
@@ -371,6 +404,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._oauth_callback(self.path.split("?", 1)[1] if "?" in self.path else "")
         if path == "/api/me/contents":
             return self._me_contents()
+        if path == "/api/quota":
+            return self._quota()
         if path == "/api/status":
             _rules, src, is_ex = ca.load_rules()
             return self._send(200, {
