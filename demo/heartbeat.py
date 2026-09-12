@@ -32,9 +32,13 @@ def alive():
 
 
 def spawn():
-    py = sys.executable
+    """用 console 版 python + CREATE_NO_WINDOW：pythonw 无 stdout 会让 server 的 print 直接崩。"""
+    py = sys.executable.replace("pythonw.exe", "python.exe")
+    if not os.path.exists(py):
+        py = sys.executable
     subprocess.Popen([py, os.path.join(HERE, "server.py"), "--port", PORT, "--no-browser"],
-                     cwd=ROOT, creationflags=0x08000000)  # CREATE_NO_WINDOW
+                     cwd=ROOT, creationflags=0x08000000,  # CREATE_NO_WINDOW
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def main():
