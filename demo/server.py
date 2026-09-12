@@ -262,16 +262,11 @@ class Handler(BaseHTTPRequestHandler):
         now = _t.time()
         if now - self._ME_CACHE[0] < 60:
             return self._send(200, self._ME_CACHE[1])
-        secret = cd._load_secret()
-        if not secret:
-            return self._send(200, {"Code": 20001, "Message": "未配置 Access Secret（env ZHIHU_ACCESS_SECRET 或 demo/secret.txt）——授权读取本人创作数据待连接；可先用演示数据或贴入式分析"})
+        headers, mode = self._secret_for_me()
+        if not headers:
+            return self._send(200, {"Code": 20001, "Message": "未配置 Access Secret（env ZHIHU_ACCESS_SECRET 或 demo/secret.txt）——授权读取创作数据待连接；可先用演示数据或贴入式分析"})
         url = "https://developer.zhihu.com/api/v1/user/contents?ContentType=all&Limit=50&Offset=0&SortField=ts&SortOrder=desc"
-        req = urllib.request.Request(url, headers={
-            "Authorization": "Bearer " + secret,
-            "X-Request-Timestamp": str(int(now)),
-            "Content-Type": "application/json",
-            "User-Agent": "kanshan-demo/0.1",
-        })
+        req = urllib.request.Request(url, headers=headers)
         try:
             with urllib.request.urlopen(req, timeout=20) as r:
                 body = r.read().decode("utf-8", "replace")
@@ -285,6 +280,75 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"Code": e.code, "Message": "官方接口 HTTP %d" % e.code})
         except Exception as e:
             return self._send(200, {"Code": 90001, "Message": "官方接口不可达: %s" % str(e)[:80]})
+
+
+    # ---- OAuth 现场访客自测（官方 hackathon-oauth.md 一手流程）----
+    # 凭证三分：App ID(可公开) / App Key(env ZHIHU_OAUTH_APP_KEY) / Access Secret(env ZHIHU_ACCESS_SECRET)
+    # App Key/code/token 绝不进前端/URL/日志/仓库。
+    _OAUTH = {"token": None, "ts": 0.0}
+
+    def _oauth_cfg(self):
+        app_id = os.environ.get("ZHIHU_OAUTH_APP_ID", "").strip()
+        app_key = os.environ.get("ZHIHU_OAUTH_APP_KEY", "").strip()
+        redirect = os.environ.get("OAUTH_REDIRECT_URI", "").strip()
+        return app_id, app_key, redirect
+
+    def _oauth_authorize_url(self):
+        """GET /api/oauth/url -> 引导跳转地址（App ID 可公开；无配置时返回未配置提示）。"""
+        import urllib.parse
+        app_id, _, redirect = self._oauth_cfg()
+        if not (app_id and redirect):
+            return self._send(200, {"ok": False,
+                "error": "OAuth 未配置（缺 ZHIHU_OAUTH_APP_ID 或 OAUTH_REDIRECT_URI）——可先用贴入式分析或演示数据"})
+        q = urllib.parse.urlencode({"redirect_uri": redirect, "app_id": app_id,
+                                    "response_type": "code"})
+        return self._send(200, {"ok": True, "url": "https://openapi.zhihu.com/authorize?" + q})
+
+    def _oauth_callback(self, query):
+        """GET /oauth/callback：收 authorization_code -> 换 token（服务端内存会话）-> 回演示页。"""
+        import urllib.parse
+        import urllib.request
+        params = urllib.parse.parse_qs(query)
+        code = (params.get("authorization_code") or params.get("code") or [""])[0]
+        if not code:
+            return self._send(200, "<script>location='/'</script>", "text/html; charset=utf-8")
+        app_id, app_key, redirect = self._oauth_cfg()
+        if not (app_id and app_key and redirect):
+            return self._send(200, "<script>location='/'</script>", "text/html; charset=utf-8")
+        body = urllib.parse.urlencode({
+            "app_id": app_id, "app_key": app_key,
+            "grant_type": "authorization_code", "redirect_uri": redirect, "code": code,
+        }).encode()
+        req = urllib.request.Request("https://openapi.zhihu.com/access_token", data=body, headers={
+            "Content-Type": "application/x-www-form-urlencoded",
+            "User-Agent": "kanshan-demo/0.1"})
+        try:
+            with urllib.request.urlopen(req, timeout=20) as r:
+                d = json.loads(r.read().decode("utf-8", "replace"))
+        except Exception:
+            d = {}
+        token = d.get("access_token")
+        if token:
+            self._OAUTH["token"] = token
+            self._OAUTH["ts"] = __import__("time").time()
+        return self._send(200, "<script>location='/v2'</script>", "text/html; charset=utf-8")
+
+    def _secret_for_me(self):
+        """user/contents 鉴权头：优先现场访客 OAuth token（X-OAuth-Token），回退本人 secret。
+        官方红线：OAuth 失效时停止读取，不回退到 Access Secret 所属账号——故 token 存在但过期时直接报错不静默回退。"""
+        import time as _t
+        secret = cd._load_secret()
+        if not secret:
+            return None, "未配置 Access Secret"
+        headers = {"Authorization": "Bearer " + secret,
+                   "X-Request-Timestamp": str(int(_t.time())),
+                   "Content-Type": "application/json",
+                   "User-Agent": "kanshan-demo/0.1"}
+        tok = self._OAUTH.get("token")
+        if tok:
+            headers["X-OAuth-Token"] = tok
+            return headers, "oauth-visitor"
+        return headers, "self"
 
     def do_GET(self):
         path = self.path.split("?", 1)[0]
@@ -301,6 +365,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, f.read(), "text/html; charset=utf-8")
         if path == "/api/health":
             return self._send(200, {"ok": True})
+        if path == "/api/oauth/url":
+            return self._oauth_authorize_url()
+        if path == "/oauth/callback":
+            return self._oauth_callback(self.path.split("?", 1)[1] if "?" in self.path else "")
         if path == "/api/me/contents":
             return self._me_contents()
         if path == "/api/status":

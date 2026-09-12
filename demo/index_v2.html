@@ -428,7 +428,21 @@
       <div class="entry-card cli-entry">
         <div class="entry-eyebrow">方式二 · 公开账号</div>
         <div class="entry-title">用知乎 CLI 抓取并分析</div>
-        <div class="entry-desc">优先调用官方 <b>zhihu-cli search zhihu</b>，再按 people ID 抓取对应公开主页、回答和文章，分析完成后自动返回第二屏。</div>
+        <div style="margin:14px 0;"><button id="visitor-oauth-btn" style="padding:10px 22px;border-radius:10px;border:0;background:#2e7cf6;color:#fff;font-size:15px;cursor:pointer;">用你自己的知乎号试试（官方授权，只读创作数据）</button><span id="visitor-oauth-hint" style="margin-left:10px;color:#888;font-size:13px;"></span></div>
+<script>
+(function(){
+  var b = document.getElementById('visitor-oauth-btn');
+  if (!b) return;
+  b.addEventListener('click', function(){
+    var hint = document.getElementById('visitor-oauth-hint');
+    fetch(GW + '/api/oauth/url').then(function(r){return r.json();}).then(function(j){
+      if (j && j.ok && j.url) { hint.textContent=''; location.href = j.url; }
+      else { hint.textContent = (j && j.error) ? j.error : '授权入口未配置——可先用下方方式或贴入式分析'; }
+    }).catch(function(){ hint.textContent = '网关未就绪——可先用贴入式分析'; });
+  });
+})();
+</script>
+<div class="entry-desc">优先调用官方 <b>zhihu-cli search zhihu</b>，再按 people ID 抓取对应公开主页、回答和文章，分析完成后自动返回第二屏。</div>
         <label class="field-label" for="uid">知乎 ID 或主页链接</label>
         <input class="uinput small" id="uid" placeholder="如 zhang-jia-wei 或 https://www.zhihu.com/people/..." autocomplete="off">
         <div class="flow-row">
