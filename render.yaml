@@ -1,0 +1,21 @@
+# 动态线（部署双线之②）：demo/server.py 托管到 Render 免费档（或任何 Python 平台）。
+# 与静态线（.github/workflows/pages.yml 预渲染 Pages）并行：静态=保底，动态=真实网关（多账号/三卡接口）。
+#
+# 一键部署：Render 控制台 New → Web Service → 连接本仓库 → 自动读本文件。
+# 首次部署后访问 https://<service>.onrender.com/ 即公网可操作 Demo。
+#
+# 安全口径：
+# - 服务端不读任何凭证文件；真实数据 data/real/ 已被 .gitignore 挡在仓库外（CI/云端只见合成演示数据）。
+# - 绑 0.0.0.0 由 KANSHAN_ALLOW_PUBLIC=1 显式放行（本地运行默认仍锁 127.0.0.1）。
+# - 免费档冷启动慢（约 30-60s），演示前先点一次预热；正式演示建议 GitHub Pages 静态版兜底。
+services:
+  - type: web
+    name: kanshan-demo
+    runtime: python
+    plan: free
+    buildCommand: pip install --no-cache-dir -r requirements-demo.txt || true
+    startCommand: python demo/server.py --host 0.0.0.0 --port $PORT --no-browser
+    envVars:
+      - key: KANSHAN_ALLOW_PUBLIC
+        value: "1"
+    healthCheckPath: /

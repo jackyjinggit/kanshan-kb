@@ -445,8 +445,10 @@ def main():
         REAL["accounts"].append(ac)
     if not explicit:                           # 目录扫描：默认 = 最近拉取的那份（刚拉的号自动排第一）
         REAL["accounts"].sort(key=lambda x: os.stat(x["path"]).st_mtime, reverse=True)
-    if a.host not in ("127.0.0.1", "localhost"):
+    allow_public = os.environ.get("KANSHAN_ALLOW_PUBLIC") == "1"
+    if a.host not in ("127.0.0.1", "localhost") and not allow_public:
         print("[!] 演示网关只允许绑定本机地址（收到 %s）——防止把本地服务暴露到网络上" % a.host)
+        print("[!] 云端部署场景（bind 0.0.0.0）需显式设环境变量 KANSHAN_ALLOW_PUBLIC=1 放行（见 render.yaml）")
         return 2
 
     httpd = ThreadingHTTPServer((a.host, a.port), Handler)
