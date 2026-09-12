@@ -383,6 +383,14 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:
             return self._send(200, {"Code": 90001, "Message": "quota 不可达: %s" % str(e)[:80]})
 
+
+    def _cli_public(self, query):
+        """v2 壳方式二（公开账号抓取）的兼容端点——当前为结构化降级：
+        完整 v4 公开抓取冲刺期移植（石版实现已评估）；先引导方式一/演示数据，页面不会白屏。"""
+        return self._send(200, {"Code": 90003,
+            "Message": "公开账号桥接待接：请用「方式一 · 我的账号」（官方授权读取）或演示数据",
+            "Detail": "v4 公开列表接口受官方风控限制，完整移植进行中"})
+
     def do_GET(self):
         path = self.path.split("?", 1)[0]
         if path in ("/", "/index.html", "/v2", "/index_v2.html"):
@@ -406,6 +414,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._me_contents()
         if path == "/api/quota":
             return self._quota()
+        if path == "/api/cli/public":
+            q = self.path.split("?", 1)[1] if "?" in self.path else ""
+            return self._cli_public(q)
         if path == "/api/status":
             _rules, src, is_ex = ca.load_rules()
             return self._send(200, {

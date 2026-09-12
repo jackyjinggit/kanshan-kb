@@ -219,11 +219,15 @@ def check_demo_server():
         else:
             return ("本地演示网关（页面+两接口）", False, "30 秒内未就绪")
 
-        st_page, body = urllib.request.urlopen(base + "/", timeout=10).status, urllib.request.urlopen(base + "/", timeout=10).read()
+        r_cls = urllib.request.urlopen(base + "/classic", timeout=10)
+        st_page, body = r_cls.status, r_cls.read()
+        r_v2 = urllib.request.urlopen(base + "/", timeout=10)
+        st_v2, v2body = r_v2.status, r_v2.read()
         st1, s = call("/api/status")
         st2, d = call("/api/diagnose", {"user": "验收账号甲", "archetype": "polluted", "days": 30})
         st3, a = call("/api/analyze", {"text": GOOD_PASTE})
-        ok = (st_page == 200 and b"\xe8\xb4\xa6\xe5\x8f\xb7\xe8\xaf\x8a\xe6\x96\xad" in body  # 「账号诊断」UTF-8
+        ok = (st_page == 200 and "账号诊断".encode("utf-8") in body  # classic 引擎页「账号诊断」
+              and st_v2 == 200 and b"visitor-oauth-btn" in v2body  # 根路由 = v2 三屏壳
               and s["ok"] and s["offline"]
               and len(d["prescriptions"]) >= 10 and d["meta"]["user"] == "验收账号甲"
               and a.get("score") is not None)

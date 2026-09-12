@@ -871,7 +871,7 @@ document.querySelectorAll("#steps .step").forEach(function (el) {
 });
 
 /* ============ L1 数据接入层（官方开放平台 API · 本地网关） ============ */
-var GW = "http://localhost:8699"; /* 主仓网关（原石版 8686 → 8699）*/ /* 本地网关：密钥只留本机，不进前端 */
+var GW = ""; /* 同源相对路径：页面由网关服务，fetch 相对路径零跨源（file:// 直开请用预渲染单文件版）*/
 var GW_OK = false, GW_SECRET = false, QUOTA = null;
 
 function gwFetch(path, timeoutMs) {
@@ -1735,7 +1735,7 @@ document.querySelectorAll("#dpan button").forEach(function (b) {
   if (ok && typeof fetch === "function") {
     var ctrl = (typeof AbortController !== "undefined") ? new AbortController() : null;
     var timer = setTimeout(function () { if (ctrl) ctrl.abort(); }, 3000);
-    fetch("http://localhost:8699/api/status", ctrl ? { signal: ctrl.signal } : undefined)
+    fetch("api/status", ctrl ? { signal: ctrl.signal } : undefined)
       .then(function (r) { return r.json(); })
       .then(function (j) {
         clearTimeout(timer);
