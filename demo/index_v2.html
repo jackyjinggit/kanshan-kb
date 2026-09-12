@@ -1064,7 +1064,7 @@ function startOfficial() {
       var c = e && e.code;
       if (c === "GW_DOWN" || (e instanceof Error && /gw down|Failed to fetch|NetworkError/i.test(e.message || ""))) {
         msg = "本地网关未启动";
-        hint = "打开 frontend 文件夹，双击 <b>启动_现场模式.bat</b>，等黑窗口显示「服务已启动」、浏览器打开 <b>http://localhost:8699/</b> 后再点本按钮。没装 Python？到 python.org 安装（勾选 Add to PATH）。也可用方式二或演示数据。";
+        hint = "双击 <b>启动_现场模式.bat</b>，等黑窗口显示「服务已启动」、浏览器打开 <b>http://localhost:8699/</b> 后再点本按钮。没装 Python？到 python.org 安装（勾选 Add to PATH）。也可用方式二或演示数据。";
       } else if (c === "NO_SECRET") {
         msg = "本机未配置 Access Secret";
         hint = "两步：① 打开 <a href='https://developer.zhihu.com/profile' target='_blank' style='color:var(--pri)'>developer.zhihu.com/profile</a> 生成密钥；② 把密钥粘贴进 demo 文件夹下的 <b>secret.txt</b>（或设环境变量 ZHIHU_ACCESS_SECRET），然后重启 <b>启动_现场模式.bat</b>。暂无密钥？用方式二或演示数据。";
