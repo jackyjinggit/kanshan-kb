@@ -5,6 +5,9 @@ if "%ZHIHU_OAUTH_APP_ID%"=="" set ZHIHU_OAUTH_APP_ID=paste_AppID_here
 if "%ZHIHU_OAUTH_APP_KEY%"=="" set ZHIHU_OAUTH_APP_KEY=paste_AppKey_here
 if "%ZHIHU_ACCESS_SECRET%"=="" set ZHIHU_ACCESS_SECRET=paste_AccessSecret_here
 if "%OAUTH_REDIRECT_URI%"=="" set OAUTH_REDIRECT_URI=http://127.0.0.1:8699/oauth/callback
+rem Kill stale instances (double-bind causes random routing to a dead worker)
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":8699.*LISTENING"') do taskkill /F /PID %%a >nul 2>&1
+taskkill /F /IM pythonw.exe >nul 2>&1
 echo [1/2] Gateway starting at http://127.0.0.1:8699/  (v2 timeline UI; classic engine at /classic)
 cd /d %~dp0..
 start "" /min pythonw demo\heartbeat.py
