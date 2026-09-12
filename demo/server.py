@@ -251,6 +251,41 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", "0")
         self.end_headers()
 
+
+    _ME_CACHE = [0.0, "{}"]
+
+    def _me_contents(self):
+        """官方 /api/v1/user/contents HTTP 直调（v2 壳兼容端点）。密钥只留服务端。"""
+        import time as _t
+        import urllib.request
+        import urllib.error
+        now = _t.time()
+        if now - self._ME_CACHE[0] < 60:
+            return self._send(200, self._ME_CACHE[1])
+        secret = cd._load_secret()
+        if not secret:
+            return self._send(200, {"Code": 20001, "Message": "未配置 Access Secret（env ZHIHU_ACCESS_SECRET 或 demo/secret.txt）——授权读取本人创作数据待连接；可先用演示数据或贴入式分析"})
+        url = "https://developer.zhihu.com/api/v1/user/contents?ContentType=all&Limit=50&Offset=0&SortField=ts&SortOrder=desc"
+        req = urllib.request.Request(url, headers={
+            "Authorization": "Bearer " + secret,
+            "X-Request-Timestamp": str(int(now)),
+            "Content-Type": "application/json",
+            "User-Agent": "kanshan-demo/0.1",
+        })
+        try:
+            with urllib.request.urlopen(req, timeout=20) as r:
+                body = r.read().decode("utf-8", "replace")
+            self._ME_CACHE[0] = now
+            self._ME_CACHE[1] = body
+            return self._send(200, body)
+        except urllib.error.HTTPError as e:
+            try:
+                return self._send(200, e.read().decode("utf-8", "replace"))
+            except Exception:
+                return self._send(200, {"Code": e.code, "Message": "官方接口 HTTP %d" % e.code})
+        except Exception as e:
+            return self._send(200, {"Code": 90001, "Message": "官方接口不可达: %s" % str(e)[:80]})
+
     def do_GET(self):
         path = self.path.split("?", 1)[0]
         if path in ("/", "/index.html"):
@@ -258,8 +293,16 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(500, {"ok": False, "error": "缺少 index.html"})
             with open(INDEX, "rb") as f:
                 return self._send(200, f.read(), "text/html; charset=utf-8")
+        if path in ("/v2", "/index_v2.html"):
+            v2 = os.path.join(HERE, "index_v2.html")
+            if not os.path.isfile(v2):
+                return self._send(500, {"ok": False, "error": "缺少 index_v2.html"})
+            with open(v2, "rb") as f:
+                return self._send(200, f.read(), "text/html; charset=utf-8")
         if path == "/api/health":
             return self._send(200, {"ok": True})
+        if path == "/api/me/contents":
+            return self._me_contents()
         if path == "/api/status":
             _rules, src, is_ex = ca.load_rules()
             return self._send(200, {
@@ -281,6 +324,7 @@ class Handler(BaseHTTPRequestHandler):
                 "archetypes": real_archetypes(),
                 "severity_hint": SEVERITY_HINT,
                 "data_source": real_source(),
+                "secret": bool(cd._load_secret()),
                 "disclaimer": (
                     "当前为**真实数据模式**：本机已授权账号（%d 个）的 zhihu-cli 拉取数据，只在本地读取、不上传；"
                     "平台不提供的指标（粉丝/曝光/小时级点击率/完播）本工具不推断" % len(REAL["accounts"])
