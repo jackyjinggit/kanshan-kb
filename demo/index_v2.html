@@ -839,6 +839,18 @@ var DEMO_PROFILE = { name: "山人书房（演示）", id: "demo", followers: 52
 var curStep = 1, unlocked = 1, mode = "ok";
 var A = null, GOAL = 10000, kbFilter = "all";
 var KB_REPO = "https://github.com/jackyjinggit/kanshan-kb";
+/* 模块号 → 仓库实际目录（方法卡在 M*_子目录下，链接需 /blob/main/ 前缀） */
+var KB_MODULE_DIR = {
+  M1: "M1_定位与赛道选择", M2: "M2_人设与账号包装", M3: "M3_选题方法论",
+  M4: "M4_内容生产与爆款公式", M5: "M5_平台算法与分发机制", M6: "M6_发布与冷启动运营",
+  M7: "M7_粉丝增长与互动运营", M8: "M8_数据复盘与迭代", M9: "M9_变现路径", M10: "M10_合规与风险"
+};
+function kbMethodUrl(m) {
+  var dir = KB_MODULE_DIR[m.module];
+  if (!dir) return KB_REPO;
+  var name = (m.id || "") + "_" + String(m.title || "").replace(/[\\/:*?"<>|]/g, "");
+  return KB_REPO + "/blob/main/" + encodeURIComponent(dir) + "/" + encodeURIComponent(name) + ".md";
+}
 
 /* ============ 流程控制 ============ */
 function goStep(s) {
@@ -1599,7 +1611,7 @@ function renderScreen3() {
     h += '<div class="mhead"><span class="mmod">' + m.module + " " + esc(m.modName) + '</span><span class="mname">' + esc(m.title) + '</span><span class="mtime">适用：' + esc(m.platform) + " · " + esc(m.stage) + '</span></div>';
     h += '<div class="row3 r1"><div class="no">①</div><div class="body"><div class="h">诊断</div><div class="t">' + m.diag(c, A) + '</div></div></div>';
     h += '<div class="row3 r2"><div class="no">②</div><div class="body"><div class="h">处方（' + m.rx(c, A).length + ' 个动作）</div><div class="t">' + m.rx(c, A).map(function (r, j) { return (j + 1) + ". " + r; }).join("<br>") + '</div></div></div>';
-    var mdUrl = KB_REPO + "/" + encodeURIComponent(m.module + "-" + (m.id || "").replace(/^M\d+-/, "") + "-" + (m.title || "").replace(/[\\/:*?"<>|]/g, "")) + ".md";
+    var mdUrl = kbMethodUrl(m);
     h += '<div class="row3 r3"><div class="no">③</div><div class="body"><div class="h">依据（可证伪）</div><div class="t">方法：<a class="kbref" href="' + esc(mdUrl) + '" target="_blank">' + esc(m.id) + ' ' + esc(m.modName) + '/' + esc(m.title) + '</a>（kanshan-kb 仓库）<br>数据信号：<b>' + esc(m.signalDesc) + '</b> · 本次命中分 ' + x.score + '/100<br>知乎实证：' + esc(m.zhihu) + '</div></div></div>';
     h += '<div class="sigbox">演示子集说明：本页内置方法与 kanshan-kb 仓库 md 格式兼容（type: method / 适用平台 / 适用阶段 / 数据信号），正式版直接读取仓库填充内容（负责人：组员甲）。</div>';
     h += '</div>';
