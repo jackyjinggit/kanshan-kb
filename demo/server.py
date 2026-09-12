@@ -464,6 +464,7 @@ class Handler(BaseHTTPRequestHandler):
                 "severity_hint": SEVERITY_HINT,
                 "data_source": real_source(),
                 "secret": bool(cd._load_secret()),
+                "cli": {"available": os.path.exists(cd.CLI_PATH)},
                 "disclaimer": (
                     "当前为**真实数据模式**：本机已授权账号（%d 个）的 zhihu-cli 拉取数据，只在本地读取、不上传；"
                     "平台不提供的指标（粉丝/曝光/小时级点击率/完播）本工具不推断" % len(REAL["accounts"])

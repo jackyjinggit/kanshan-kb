@@ -1756,7 +1756,7 @@ document.querySelectorAll("#dpan button").forEach(function (b) {
           txt.textContent = "引擎 ✓ " + VER + " · 网关已连 · zhihu-cli 已就绪 ✓ · Access Secret 已配置";
           txt.style.color = "var(--down)";
         } else if (j && j.ok) {
-          var cliState = j.cli && j.cli.available ? "zhihu-cli 已就绪" : "zhihu-cli 未安装";
+          var cliState = (j.cli ? j.cli.available : GW_SECRET) ? "zhihu-cli 已就绪" : "公开数据兜底模式";
           txt.textContent = "引擎 ✓ " + VER + " · 网关已连 · " + cliState + " · 方式二会明确展示 CLI 状态，未就绪时走公开数据兜底";
           txt.style.color = "var(--warn)";
         }
