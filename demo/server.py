@@ -267,129 +267,153 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {"Code": 20001, "Message": "未配置 Access Secret（env ZHIHU_ACCESS_SECRET 或 demo/secret.txt）——授权读取创作数据待连接；可先用演示数据或贴入式分析"})
         url = "https://developer.zhihu.com/api/v1/user/contents?ContentType=all&Limit=50&Offset=0&SortField=ts&SortOrder=desc"
         req = urllib.request.Request(url, headers=headers)
-        try:
-            with urllib.request.urlopen(req, timeout=20) as r:
-                body = r.read().decode("utf-8", "replace")
-            self._ME_CACHE[0] = now
-            self._ME_CACHE[1] = body
-            return self._send(200, body)
-        except urllib.error.HTTPError as e:
+        last_err = None
+        for attempt in range(2):  # 官方接口偶发慢/抖动：服务端重试 1 次，前端无感
             try:
-                return self._send(200, e.read().decode("utf-8", "replace"))
-            except Exception:
-                return self._send(200, {"Code": e.code, "Message": "官方接口 HTTP %d" % e.code})
-        except Exception as e:
-            return self._send(200, {"Code": 90001, "Message": "官方接口不可达: %s" % str(e)[:80]})
+                with urllib.request.urlopen(req, timeout=25) as r:
+                    body = r.read().decode("utf-8", "replace")
+                self._ME_CACHE[0] = _t.time()
+                self._ME_CACHE[1] = body
+                return self._send(200, body)
+            except urllib.error.HTTPError as e:
+                try:
+                    return self._send(200, e.read().decode("utf-8", "replace"))
+                except Exception:
+                    return self._send(200, {"Code": e.code, "Message": "官方接口 HTTP %d" % e.code})
+            except Exception as e:
+                last_err = e
+                _t.sleep(1.5)
+        return self._send(200, {"Code": 90001, "Message": "官方接口不可达（已重试 1 次）: %s" % str(last_err)[:80]})
 
-
-    # ---- OAuth 现场访客自测（官方 hackathon-oauth.md 一手流程）----
-    # 凭证三分：App ID(可公开) / App Key(env ZHIHU_OAUTH_APP_KEY) / Access Secret(env ZHIHU_ACCESS_SECRET)
-    # App Key/code/token 绝不进前端/URL/日志/仓库。
-    _OAUTH = {"token": None, "ts": 0.0}
-
-    def _oauth_cfg(self):
-        app_id = os.environ.get("ZHIHU_OAUTH_APP_ID", "").strip()
-        app_key = os.environ.get("ZHIHU_OAUTH_APP_KEY", "").strip()
-        redirect = os.environ.get("OAUTH_REDIRECT_URI", "").strip()
-        return app_id, app_key, redirect
-
-    def _oauth_authorize_url(self):
-        """GET /api/oauth/url -> 引导跳转地址（App ID 可公开；无配置时返回未配置提示）。"""
-        import urllib.parse
-        app_id, _, redirect = self._oauth_cfg()
-        if not (app_id and redirect):
-            return self._send(200, {"ok": False,
-                "error": "OAuth 未配置（缺 ZHIHU_OAUTH_APP_ID 或 OAUTH_REDIRECT_URI）——可先用贴入式分析或演示数据"})
-        q = urllib.parse.urlencode({"redirect_uri": redirect, "app_id": app_id,
-                                    "response_type": "code"})
-        return self._send(200, {"ok": True, "url": "https://openapi.zhihu.com/authorize?" + q})
-
-    def _oauth_callback(self, query):
-        """GET /oauth/callback：收 authorization_code -> 换 token（服务端内存会话）-> 回演示页。"""
-        import urllib.parse
-        import urllib.request
-        params = urllib.parse.parse_qs(query)
-        code = (params.get("authorization_code") or params.get("code") or [""])[0]
-        if not code:
-            return self._send(200, "<script>location='/'</script>", "text/html; charset=utf-8")
-        app_id, app_key, redirect = self._oauth_cfg()
-        if not (app_id and app_key and redirect):
-            return self._send(200, "<script>location='/'</script>", "text/html; charset=utf-8")
-        body = urllib.parse.urlencode({
-            "app_id": app_id, "app_key": app_key,
-            "grant_type": "authorization_code", "redirect_uri": redirect, "code": code,
-        }).encode()
-        req = urllib.request.Request("https://openapi.zhihu.com/access_token", data=body, headers={
-            "Content-Type": "application/x-www-form-urlencoded",
-            "User-Agent": "kanshan-demo/0.1"})
-        try:
-            with urllib.request.urlopen(req, timeout=20) as r:
-                d = json.loads(r.read().decode("utf-8", "replace"))
-        except Exception:
-            d = {}
-        token = d.get("access_token")
-        if token:
-            self._OAUTH["token"] = token
-            self._OAUTH["ts"] = __import__("time").time()
-        return self._send(200, "<script>location='/v2'</script>", "text/html; charset=utf-8")
-
-    def _secret_for_me(self):
-        """user/contents 鉴权头：优先现场访客 OAuth token（X-OAuth-Token），回退本人 secret。
-        官方红线：OAuth 失效时停止读取，不回退到 Access Secret 所属账号——故 token 存在但过期时直接报错不静默回退。"""
-        import time as _t
-        secret = cd._load_secret()
-        if not secret:
-            return None, "未配置 Access Secret"
-        headers = {"Authorization": "Bearer " + secret,
-                   "X-Request-Timestamp": str(int(_t.time())),
-                   "Content-Type": "application/json",
-                   "User-Agent": "kanshan-demo/0.1"}
-        tok = self._OAUTH.get("token")
-        if tok:
-            headers["X-OAuth-Token"] = tok
-            return headers, "oauth-visitor"
-        return headers, "self"
-
-
-    _QUOTA_CACHE = [0.0, "{}"]
-
-    def _quota(self):
-        """官方 /api/v1/quota 直调（额度查询本身不耗业务额度，300s 缓存）。"""
-        import time as _t
-        import urllib.request
-        import urllib.error
-        now = _t.time()
-        if now - self._QUOTA_CACHE[0] < 300:
-            return self._send(200, self._QUOTA_CACHE[1])
-        secret = cd._load_secret()
-        if not secret:
-            return self._send(200, {"Code": 20001, "Message": "未配置 Access Secret"})
-        req = urllib.request.Request("https://developer.zhihu.com/api/v1/quota", headers={
-            "Authorization": "Bearer " + secret,
-            "X-Request-Timestamp": str(int(now)),
-            "Content-Type": "application/json",
-            "User-Agent": "kanshan-demo/0.1"})
-        try:
-            with urllib.request.urlopen(req, timeout=15) as r:
-                body = r.read().decode("utf-8", "replace")
-            self._QUOTA_CACHE[0] = now
-            self._QUOTA_CACHE[1] = body
-            return self._send(200, body)
-        except urllib.error.HTTPError as e:
-            try:
-                return self._send(200, e.read().decode("utf-8", "replace"))
-            except Exception:
-                return self._send(200, {"Code": e.code, "Message": "quota HTTP %d" % e.code})
-        except Exception as e:
-            return self._send(200, {"Code": 90001, "Message": "quota 不可达: %s" % str(e)[:80]})
-
+    _PUB_CACHE = {}
 
     def _cli_public(self, query):
-        """v2 壳方式二（公开账号抓取）的兼容端点——当前为结构化降级：
-        完整 v4 公开抓取冲刺期移植（石版实现已评估）；先引导方式一/演示数据，页面不会白屏。"""
-        return self._send(200, {"Code": 90003,
-            "Message": "公开账号桥接待接：请用「方式一 · 我的账号」（官方授权读取）或演示数据",
-            "Detail": "v4 公开列表接口受官方风控限制，完整移植进行中"})
+        """v2 壳方式二：公开账号抓取（移植自石版网关实现，来源标注）。"""
+        import time as _t
+        import urllib.parse
+        import urllib.request
+        import urllib.error
+
+        UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+              " (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+
+        def http_get(url, headers, timeout=12):
+            req = urllib.request.Request(url, headers=headers)
+            try:
+                with urllib.request.urlopen(req, timeout=timeout) as r:
+                    return r.status, r.read().decode("utf-8", "replace")
+            except urllib.error.HTTPError as e:
+                try:
+                    return e.code, e.read().decode("utf-8", "replace")
+                except Exception:
+                    return e.code, ""
+            except Exception as e:
+                return 0, json.dumps({"Code": 90001, "Message": str(e)}, ensure_ascii=False)
+
+        def get_json(url, timeout=12):
+            st, body = http_get(url, {
+                "User-Agent": UA,
+                "Referer": "https://www.zhihu.com/",
+                "Accept": "application/json, text/plain, */*",
+            }, timeout=timeout)
+            try:
+                return st, json.loads(body)
+            except Exception:
+                return st, None
+
+        def norm_uid(raw):
+            v = urllib.parse.unquote(str(raw or "").strip())
+            if not v:
+                return ""
+            if "://" in v:
+                parsed = urllib.parse.urlparse(v)
+                if parsed.netloc not in ("www.zhihu.com", "zhihu.com"):
+                    return ""
+                parts = [x for x in parsed.path.split("/") if x]
+                try:
+                    v = parts[parts.index("people") + 1]
+                except (ValueError, IndexError):
+                    return ""
+            v = v.lstrip("@").split("?")[0].split("#")[0].strip()
+            return v if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,120}", v) else ""
+
+        params = urllib.parse.parse_qs(query)
+        uid = norm_uid((params.get("uid") or [""])[0])
+        try:
+            limit = min(20, max(1, int((params.get("limit") or ["20"])[0])))
+        except Exception:
+            limit = 20
+        if not uid:
+            return self._send(200, {"Code": 10002, "Message": "知乎 ID 或主页链接格式不正确"})
+        cache_key = uid + ":" + str(limit)
+        cached = self._PUB_CACHE.get(cache_key)
+        if cached and _t.time() - cached[0] < 60:
+            return self._send(200, cached[1])
+
+        cli_meta = {"available": False, "used": False, "status": "missing"}
+        if os.path.exists(cd.CLI_PATH):
+            try:
+                pr = subprocess.run([cd.CLI_PATH, "search", "zhihu", "--query", uid,
+                                     "--count", "10"], capture_output=True, timeout=10)
+                d = json.loads(pr.stdout.decode("utf-8", "replace"))
+                n = len(((d.get("Data") or {}).get("Items") or [])) if d.get("Code") == 0 else 0
+                cli_meta = {"available": True, "used": True, "status": "used", "result_count": n}
+            except Exception:
+                cli_meta = {"available": True, "used": False, "status": "fallback"}
+
+        base = "https://www.zhihu.com/api/v4/members/" + urllib.parse.quote(uid, safe="")
+        inc = "follower_count,voteup_count,thanked_count,favorite_count,answer_count,articles_count,headline"
+        st_p, profile = get_json(base + "?include=" + urllib.parse.quote(inc, safe=""))
+        if not isinstance(profile, dict) or profile.get("error"):
+            st_p, profile = get_json(base)
+        st_a, answers = get_json(base + "/answers?offset=0&limit=%d&sort_by=created" % limit)
+        st_r, articles = get_json(base + "/articles?offset=0&limit=%d&sort_by=created" % limit)
+
+        has_p = (isinstance(profile, dict) and not profile.get("error")
+                 and not profile.get("Code")
+                 and any(k in profile for k in ("id", "name", "url_token", "follower_count")))
+        has_a = isinstance(answers, dict) and isinstance(answers.get("data"), list)
+        has_r = isinstance(articles, dict) and isinstance(articles.get("data"), list)
+        if not (has_p or has_a or has_r):
+            return self._send(200, {"Code": 90002,
+                "Message": "知乎公开接口暂时没有返回该账号数据", "CLI": cli_meta,
+                "HttpStatus": {"profile": st_p, "answers": st_a, "articles": st_r}})
+        result = {"Code": 0, "Data": {"UID": uid,
+            "Profile": profile if has_p else None,
+            "Answers": answers if has_a else None,
+            "Articles": articles if has_r else None,
+            "CLISearch": cli_meta}}
+        self._PUB_CACHE[cache_key] = (_t.time(), result)
+        return self._send(200, result)
+
+    def _pub_proxy(self, query):
+        """v2 壳 fetchV4 代理：只允许 zhihu.com 域 JSON（防 SSRF）。"""
+        import urllib.parse
+        import urllib.request
+        import urllib.error
+        params = urllib.parse.parse_qs(query)
+        u = (params.get("u") or [""])[0]
+        parsed = urllib.parse.urlparse(u)
+        if parsed.scheme not in ("http", "https") or parsed.netloc not in (
+                "www.zhihu.com", "zhihu.com"):
+            return self._send(200, {"Code": 10003, "Message": "仅代理知乎域公开接口"})
+        req = urllib.request.Request(u, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                          " (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+            "Referer": "https://www.zhihu.com/",
+            "Accept": "application/json, text/plain, */*",
+            "X-Requested-With": "fetch",
+        })
+        try:
+            with urllib.request.urlopen(req, timeout=12) as r:
+                return self._send(200, r.read().decode("utf-8", "replace"))
+        except urllib.error.HTTPError as e:
+            try:
+                return self._send(200, e.read().decode("utf-8", "replace"))
+            except Exception:
+                return self._send(200, {"Code": e.code, "Message": "HTTP %d" % e.code})
+        except Exception as e:
+            return self._send(200, {"Code": 90001, "Message": "代理不可达: %s" % str(e)[:80]})
 
     def do_GET(self):
         path = self.path.split("?", 1)[0]
@@ -415,8 +439,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/quota":
             return self._quota()
         if path == "/api/cli/public":
-            q = self.path.split("?", 1)[1] if "?" in self.path else ""
-            return self._cli_public(q)
+            return self._cli_public(self.path.split("?", 1)[1] if "?" in self.path else "")
+        if path == "/api/pub":
+            return self._pub_proxy(self.path.split("?", 1)[1] if "?" in self.path else "")
         if path == "/api/status":
             _rules, src, is_ex = ca.load_rules()
             return self._send(200, {

@@ -907,7 +907,7 @@ function gwQuota() {
 
 /* 官方 API：我的创作内容（最近 50 条，含赞/藏/评/原文链接） */
 function fetchMyContents() {
-  return gwFetch("/api/me/contents?limit=50", 20000);
+  return gwFetch("/api/me/contents?limit=50", 45000);
 }
 
 /* 公开账号的完整链路：后端先调用官方 zhihu-cli，再返回对应账号数据。 */
