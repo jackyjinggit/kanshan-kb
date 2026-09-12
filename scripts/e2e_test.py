@@ -277,7 +277,7 @@ def check_cards():
                   and d.get("source") in ("real", "synth")
                   and len(d.get("points", [])) >= 2
                   and isinstance(d.get("nodes"), list) and len(d["nodes"]) == 3)
-        body = urllib.request.urlopen(base + "/", timeout=10).read()
+        body = urllib.request.urlopen(base + "/classic", timeout=10).read()
         ok_fe = "三卡视图" .encode("utf-8") in body and b"/api/cards" in body
         return ("三卡视图（月/周/日）", ok_api and ok_fe,
                 "api=%s 月分=%s 周7天=%s 日卡=%s(%d点) 前端挂载=%s"
@@ -385,7 +385,7 @@ def check_gateway_real_data():
             bad.append("外站被放行（不该有 CORS 头）")
         if call("/api/status", origin="null", method="OPTIONS")[0] != 204:
             bad.append("OPTIONS 预检未通过")
-        page = urllib.request.urlopen(base + "/", timeout=10).read().decode("utf-8")
+        page = urllib.request.urlopen(base + "/classic", timeout=10).read().decode("utf-8")
         # 查「真实 DOM」前先剥掉 HTML/CSS 注释：注释里写的示例代码不算控件
         slim = re.sub(r"/\*.*?\*/", "", re.sub(r"<!--.*?-->", "", page, flags=re.S), flags=re.S)
         if "<select" in slim:

@@ -79,8 +79,14 @@ class TestDemoServer(unittest.TestCase):
                 cls.proc.kill()
 
     # ---- 页面 ----
-    def test_index_served_with_two_entries(self):
+    def test_root_serves_v2_shell(self):
         st, body = call(self.port, "/")
+        self.assertEqual(st, 200)
+        self.assertIn('class="screen"', body, "根路由应默认返回 v2 三屏壳")
+        self.assertIn("visitor-oauth-btn", body, "v2 壳应含现场访客 OAuth 自测入口")
+
+    def test_index_served_with_two_entries(self):
+        st, body = call(self.port, "/classic")
         self.assertEqual(st, 200)
         self.assertIn("账号诊断", body)
         self.assertIn("贴入式内容分析", body)
@@ -89,7 +95,7 @@ class TestDemoServer(unittest.TestCase):
             self.assertNotIn(bad, body, "演示页必须离线自包含，不得引用外部 CDN")
 
     def test_index_escapes_user_content(self):
-        st, body = call(self.port, "/")
+        st, body = call(self.port, "/classic")
         self.assertIn("function esc(", body, "贴入内容必须经转义后再进 DOM")
 
     # ---- 状态 ----

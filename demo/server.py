@@ -387,19 +387,14 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
         if path in ("/", "/index.html", "/v2", "/index_v2.html"):
             v2 = os.path.join(HERE, "index_v2.html")
-            if path in ("/classic", "/classic.html"):
-                if not os.path.isfile(INDEX):
-                    return self._send(500, {"ok": False, "error": "缺少 index.html"})
-                with open(INDEX, "rb") as f:
-                    return self._send(200, f.read(), "text/html; charset=utf-8")
             if not os.path.isfile(v2):
                 return self._send(500, {"ok": False, "error": "缺少 index_v2.html"})
             with open(v2, "rb") as f:
                 return self._send(200, f.read(), "text/html; charset=utf-8")
-            v2 = os.path.join(HERE, "index_v2.html")
-            if not os.path.isfile(v2):
-                return self._send(500, {"ok": False, "error": "缺少 index_v2.html"})
-            with open(v2, "rb") as f:
+        if path in ("/classic", "/classic.html"):
+            if not os.path.isfile(INDEX):
+                return self._send(500, {"ok": False, "error": "缺少 index.html"})
+            with open(INDEX, "rb") as f:
                 return self._send(200, f.read(), "text/html; charset=utf-8")
         if path == "/api/health":
             return self._send(200, {"ok": True})
